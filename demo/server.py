@@ -455,7 +455,9 @@ HTML_DASHBOARD = """<!DOCTYPE html>
         }
       };
 
-      evtSource.onerror = function() {
+      evtSource.onerror = function(err) {
+        console.error('SSE Stream error:', err);
+        document.getElementById('interim-text').innerHTML = '<span style="color:#f87171;">Connection issue. Retrying...</span>';
         evtSource.close();
         btn.disabled = false;
         btn.innerText = 'Start Streaming Audio Chunks';
@@ -618,7 +620,7 @@ async def stream_audio_events(scenario: str = "p1") -> StreamingResponse:
                         "end_time": evt.segment.end_time,
                         "telemetry": tel,
                     }
-                    yield f"data: {json.dumps(data)}\\n\\n"
+                    yield f"data: {json.dumps(data)}\n\n"
                 elif evt.event_type == TranscriptEventType.FINAL and evt.segment:
                     data = {
                         "type": "final",
@@ -629,15 +631,23 @@ async def stream_audio_events(scenario: str = "p1") -> StreamingResponse:
                         "end_time": evt.segment.end_time,
                         "telemetry": tel,
                     }
-                    yield f"data: {json.dumps(data)}\\n\\n"
+                    yield f"data: {json.dumps(data)}\n\n"
 
             if accumulator.final_count >= len(script):
                 break
 
         tel = accumulator.get_summary()
-        yield f"data: {json.dumps({'type': 'done', 'telemetry': tel})}\\n\\n"
+        yield f"data: {json.dumps({'type': 'done', 'telemetry': tel})}\n\n"
 
-    return StreamingResponse(event_generator(), credentials=False, media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def main() -> None:
