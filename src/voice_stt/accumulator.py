@@ -163,3 +163,4 @@ class OrderedSegmentAccumulator:
             "average_confidence": round(self.get_average_confidence(), 4),
             "last_error": self._last_error.model_dump() if self._last_error else None,
         }
+

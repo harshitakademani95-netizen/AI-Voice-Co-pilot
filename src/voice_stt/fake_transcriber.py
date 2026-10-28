@@ -370,3 +370,4 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             self._active_sentence_words.clear()
 
         return events
+

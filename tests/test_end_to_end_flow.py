@@ -48,3 +48,4 @@ class TestEndToEndPipeline:
         assert full_transcript == expected
         assert accumulator.get_interim_segment() is None
         assert accumulator.get_average_confidence() > 0.90
+

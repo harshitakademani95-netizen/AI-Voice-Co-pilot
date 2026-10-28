@@ -185,3 +185,4 @@ Sample output:
 - [x] **Feature Branch:** All development on `feature/w2-speech-to-text-foundation`; zero direct pushes to `main`.
 - [x] **Zero Secrets / Personal Data:** `.gitignore` excludes audio recordings, secrets, `.env`, and virtual environments.
 - [x] **Day 7 Live Demo:** `demo/live_demo.py` ready and verified.
+

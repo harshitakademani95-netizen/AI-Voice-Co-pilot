@@ -170,3 +170,4 @@ class TestDeterministicFakeTranscriber:
             assert evt.event_type != TranscriptEventType.INTERIM
             if evt.segment:
                 assert evt.segment.is_final is True
+

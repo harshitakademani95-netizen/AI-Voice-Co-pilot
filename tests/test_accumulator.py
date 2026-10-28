@@ -185,3 +185,4 @@ class TestOrderedSegmentAccumulator:
         assert accumulator.get_full_transcript() == ""
         assert accumulator.get_total_duration() == 0.0
         assert accumulator.get_average_confidence() == 0.0
+

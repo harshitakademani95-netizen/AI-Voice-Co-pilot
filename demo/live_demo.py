@@ -15,7 +15,13 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 from typing import List
+
+# Ensure 'src' is on sys.path so the module imports reliably from any working directory
+SRC_DIR = Path(__file__).resolve().parent.parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from voice_stt.accumulator import OrderedSegmentAccumulator
 from voice_stt.adapter import STTAdapterConfig
@@ -167,3 +173,4 @@ if __name__ == "__main__":
     parser.add_argument("--fast", action="store_true", help="Execute without simulated streaming delay")
     args = parser.parse_args()
     sys.exit(run_mock_demo(fast=args.fast))
+

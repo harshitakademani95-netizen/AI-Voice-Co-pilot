@@ -124,3 +124,4 @@ def sample_error_event() -> TranscriptEvent:
             details={"buffer_size": 0},
         ),
     )
+
