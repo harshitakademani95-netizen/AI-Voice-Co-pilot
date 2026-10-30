@@ -391,3 +391,53 @@ Status: ALL TESTS PASSED [OK]
 | `ReasoningResult.response_text` | `response` | Output text produced by reasoning |
 | `ReasoningResult.status == "success"` | `completed` | Task completion indicator |
 | `ReasoningResult.requires_approval` | `requires_approval` | Human-in-the-loop gate required |
+
+---
+---
+
+# Part 4: Workstream W5 – Backend & Sessions
+
+**Developer**: Vaishnavi G  
+**Workstream**: W5 – Backend and Sessions  
+**Test Suite**: 27 Automated Unit & Route Tests (100% Passing)
+
+## 1. Overview & Architecture
+
+This module establishes the core **Backend Foundation and Sessions Layer** for the AI Voice Co-Pilot system:
+1. **Application Skeleton & Probes**: FastAPI backend with /health and /ready probes monitoring service vitality and in-memory repository readiness.
+2. **Typed Error Envelope**: Standardized schema (code, message_safe_for_user, 
+etryable, correlation_id, details_redacted) with automatic redaction of sensitive credentials, Bearer tokens, and secrets (src/core/security.py).
+3. **Request & Correlation-ID Middleware**: RequestCorrelationMiddleware ensures every request and response carries X-Request-ID and X-Correlation-ID.
+4. **Session State Machine & In-Memory Repository**: Thread-safe in-memory session engine (InMemorySessionRepository) with strict validation across all 7 lifecycle states: created, ctive, paused, stopping, completed, ailed, and expired.
+5. **One-Command Mock Launcher**: Starts the backend with zero external dependencies (python run_mock.py or .\scripts\run_mock.bat).
+6. **Cross-Team API Contracts**: 6 standardized contracts defined in docs/api-contracts/ (oice.md, context.md, i-chat.md, gent-plan.md, 	ools-execute.md, pprovals.md) and cross-team integration guide in docs/INTEGRATION_GUIDE.md.
+
+## 2. Session Lifecycle States
+
+| State | Permitted Transitions | Notes |
+| :--- | :--- | :--- |
+| created | ctive, ailed, expired | Default state on creation. |
+| ctive | paused, stopping, completed, ailed, expired | Processing user speech/context. |
+| paused | ctive, stopping, ailed, expired | Suspended interaction. |
+| stopping | completed, ailed | Graceful shutdown in progress. |
+| completed | *None* | Terminal state. |
+| ailed | *None* | Terminal state. |
+| expired | *None* | Terminal state. |
+
+## 3. How to Run W5 Backend Features
+
+### One-Command Mock Launcher
+`powershell
+python run_mock.py
+`
+Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive Swagger UI.
+
+### Live Demonstration
+`powershell
+python scripts/demo_day7.py
+`
+
+### Running Backend Unit & Route Tests
+`powershell
+python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors.py tests/test_sessions.py -v
+`

@@ -1,17 +1,48 @@
-"""Pytest fixtures for AI Voice Co-Pilot STT pipeline tests."""
+"""Pytest fixtures for AI Voice Co-Pilot: STT pipeline and Backend tests."""
 
 from typing import List
 import pytest
+from starlette.testclient import TestClient
 
-from voice_stt.schemas import (
-    AudioChunk,
-    STTErrorDetail,
-    TranscriptEvent,
-    TranscriptEventType,
-    TranscriptSegment,
-    WordTiming,
-)
+from src.app import create_app
+from src.repositories.session_repository import session_repository
 
+try:
+    from voice_stt.schemas import (
+        AudioChunk,
+        STTErrorDetail,
+        TranscriptEvent,
+        TranscriptEventType,
+        TranscriptSegment,
+        WordTiming,
+    )
+except ImportError:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Backend & Sessions Workstream (W5) Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def clean_repository():
+    """Ensures a clean in-memory session repository before each test."""
+    session_repository.clear()
+    yield
+    session_repository.clear()
+
+
+@pytest.fixture
+def client():
+    """Provides a TestClient instance for testing backend routes."""
+    app = create_app()
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+# ---------------------------------------------------------------------------
+# STT Pipeline Workstream (W2) Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def sample_audio_bytes() -> bytes:
@@ -20,8 +51,9 @@ def sample_audio_bytes() -> bytes:
 
 
 @pytest.fixture
-def sample_audio_chunks(sample_audio_bytes: bytes) -> List[AudioChunk]:
+def sample_audio_chunks(sample_audio_bytes: bytes) -> List["AudioChunk"]:
     """Series of 5 consecutive audio chunks."""
+    from voice_stt.schemas import AudioChunk
     chunks = []
     for i in range(5):
         chunks.append(
@@ -39,8 +71,9 @@ def sample_audio_chunks(sample_audio_bytes: bytes) -> List[AudioChunk]:
 
 
 @pytest.fixture
-def valid_interim_segment() -> TranscriptSegment:
+def valid_interim_segment() -> "TranscriptSegment":
     """A valid interim transcript segment."""
+    from voice_stt.schemas import TranscriptSegment
     return TranscriptSegment(
         segment_id="seg-interim-001",
         text="Why is this application",
@@ -53,8 +86,9 @@ def valid_interim_segment() -> TranscriptSegment:
 
 
 @pytest.fixture
-def valid_final_segment() -> TranscriptSegment:
+def valid_final_segment() -> "TranscriptSegment":
     """A valid finalized transcript segment with word timings."""
+    from voice_stt.schemas import TranscriptSegment, WordTiming
     return TranscriptSegment(
         segment_id="seg-final-001",
         text="Why is this application showing this error?",
@@ -76,8 +110,9 @@ def valid_final_segment() -> TranscriptSegment:
 
 
 @pytest.fixture
-def out_of_order_segments() -> List[TranscriptSegment]:
+def out_of_order_segments() -> List["TranscriptSegment"]:
     """Three final segments emitted intentionally out of chronological order."""
+    from voice_stt.schemas import TranscriptSegment
     seg_1 = TranscriptSegment(
         segment_id="seg-part-1",
         text="First sentence.",
@@ -105,13 +140,13 @@ def out_of_order_segments() -> List[TranscriptSegment]:
         is_final=True,
         language="en",
     )
-    # Delivered in order: [seg_2, seg_3, seg_1]
     return [seg_2, seg_3, seg_1]
 
 
 @pytest.fixture
-def sample_error_event() -> TranscriptEvent:
+def sample_error_event() -> "TranscriptEvent":
     """An event representing an STT processing failure."""
+    from voice_stt.schemas import TranscriptEvent, TranscriptEventType, STTErrorDetail
     return TranscriptEvent(
         event_id="err-event-001",
         event_type=TranscriptEventType.ERROR,
@@ -124,4 +159,3 @@ def sample_error_event() -> TranscriptEvent:
             details={"buffer_size": 0},
         ),
     )
-
