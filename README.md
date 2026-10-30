@@ -1,188 +1,294 @@
 # AI Voice Co-Pilot - Speech-to-Text Pipeline Foundation (Workstream W2)
 
-[![CI - Test Suite](https://img.shields.io/badge/pytest-43%20passed-brightgreen.svg)]()
+[![CI - Test Suite](https://img.shields.io/badge/pytest-81%20passed-brightgreen.svg)]()
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 [![Workstream](https://img.shields.io/badge/workstream-W2%20Speech--to--Text-orange.svg)]()
 [![Team](https://img.shields.io/badge/team-SDE%203-purple.svg)]()
 
 > **Engineer:** Disha D K (SDE 3)  
 > **Workstream:** W2 – Speech-to-Text Foundation (Week 1, Day 1–Day 7)  
-> **Status:** Completed & Ready for Review  
-> **Branch:** `feature/w2-speech-to-text-foundation`
+> **Status:** Ready for review  
+> **Working Branch:** `feature/w2-speech-to-text-foundation`  
 
 ---
 
-## 1. Overview & Architecture
+## Installation and Setup
 
-This package implements the foundation and first vertical slice of the **AI Voice Co-Pilot** Speech-to-Text (STT) pipeline. Designed strictly against the PRD (`01. PRD`), System Design Document (`02. SDD`), and API Specifications (`04. API Specifications`), this module provides:
+### Prerequisites
+- Python 3.10 or higher
 
-1. **Transcript Schemas (`TranscriptSegment`, `TranscriptEvent`)**:
-   - Single authoritative source of truth defined once in `src/voice_stt/schemas.py`.
-   - Explicit constraints: timestamps in seconds, normalized confidence `[0.0, 1.0]`, ISO language tags, structured error objects, and word-level timings.
-   - Strict rejection of invalid payloads with human-readable error descriptions.
-2. **Provider-Neutral Adapter (`BaseSTTAdapter`)**:
-   - Provider-agnostic interface allowing real engines (Whisper, Deepgram, Google Cloud STT) or test doubles to be swapped without changing downstream orchestration.
-   - Fully runnable in mock mode with **no external API keys, credentials, or network dependencies**.
-3. **Deterministic Fake Transcriber (`DeterministicFakeTranscriber`)**:
-   - Guarantees: **identical audio chunk input sequences produce 100% bit-for-bit identical transcript events**.
-   - Simulates streaming interim hypotheses and finalized segments.
-   - Built-in error injection support for resilience testing.
-4. **Ordered Segment Accumulator (`OrderedSegmentAccumulator`)**:
-   - Aggregates streaming events into a strictly chronological, deduplicated transcript.
-   - Cleanly isolates unconfirmed interim hypotheses from committed immutable segments.
-   - Automatically handles out-of-order segment arrivals (re-orders on arrival).
-5. **Day 7 Live Demonstration (`demo/live_demo.py`)**:
-   - Complete chunk-to-transcript simulation with streaming terminal output and determinism audit.
+### 1. Create and activate a virtual environment
+
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Install the project and development dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+This installs `voice_stt` as an editable package and all test dependencies (`pytest`, etc.).
+
+### 3. Install optional dashboard dependencies
+
+The interactive web dashboard (`demo/server.py`) requires FastAPI and Uvicorn, which are **not** included in the core development dependencies:
+
+```bash
+pip install fastapi uvicorn
+```
+
+These are only needed if you want to run the dashboard at `http://localhost:8000`. The core library and full test suite work without them.
 
 ---
 
-## 2. Directory Structure
+## 1. Overview & Workstream Scope
 
-```text
-AI Voice Co-Pilot/
-├── .gitignore                      # Comprehensive ignores (no recordings, venvs, secrets)
-├── pyproject.toml                  # Package configuration, dependencies & pytest settings
-├── requirements.txt                # Production and test dependencies
-├── README.md                       # Workstream documentation
-├── src/
-│   └── voice_stt/
-│       ├── __init__.py             # Public package exports
-│       ├── schemas.py              # Day 1-2: TranscriptSegment, TranscriptEvent, AudioChunk, STTErrorDetail
-│       ├── adapter.py              # Day 3-4: BaseSTTAdapter, STTAdapterConfig, STTAdapterStatus
-│       ├── fake_transcriber.py     # Day 3-4: DeterministicFakeTranscriber (same input -> identical events)
-│       └── accumulator.py          # Day 5-6: OrderedSegmentAccumulator (ordering, interim/final, dedup)
-├── tests/
-│   ├── conftest.py                 # Reusable test fixtures (audio chunks, segments, edge cases)
-│   ├── test_schemas.py             # Schema boundary and invalid payload rejection tests
-│   ├── test_adapter_and_fake.py    # Adapter interface and determinism verification tests
-│   ├── test_accumulator.py         # Accumulator ordering, interim lifecycle, deduplication tests
-│   └── test_end_to_end_flow.py     # End-to-end chunk-to-transcript integration tests
-├── demo/
-│   └── live_demo.py                # Day 7: Live chunk-to-transcript streaming demonstration
-└── docs/
-    └── PULL_REQUEST.md             # Complete GitHub Pull Request documentation with test output
+This repository contains the foundation and first vertical slice of the **Speech-to-Text (STT)** pipeline for **Academia — AI Voice Co-Pilot** (Team SDE 3).
+
+### What Workstream W2 Owns:
+- **Canonical Transcript Schemas**: Single shared definition of `TranscriptSegment`, `TranscriptEvent`, and `STTErrorDetail`.
+- **Provider-Neutral Adapter**: Abstract interface decoupling transcription from specific commercial vendors.
+- **Deterministic Fake Transcriber**: 100% reproducible test double operating offline without paid API keys.
+- **Ordered Segment Accumulator**: Chronologically sorts speech segments, isolates interim hypotheses, suppresses duplicates, and reconstructs continuous text.
+- **Canonical Demonstration Fixtures**: Six named fixtures (A through F) exercising standard speech, lifecycle evolution, out-of-order delivery, duplicate suppression, invalid payload rejection, and failure recovery.
+- **Observability Dashboard**: Localhost web application on `http://127.0.0.1:8000` with live SSE streaming, arrival timeline diagnostics, and live determinism audits.
+
+### What Lies Outside W2's Scope:
+Downstream capabilities described in the PRD (screen capture, OCR, multimodal LLM reasoning, agent tool execution, text-to-speech) are owned by other engineering teams (W3/W4) and will integrate with W2's contracts in subsequent milestones.
+
+---
+
+## 2. Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    subgraph AudioIngestion["1. Audio Slices / Input"]
+        Mic["Simulated PCM Chunks (100ms)"] --> AC["AudioChunk Payload"]
+    end
+
+    subgraph STTLayer["2. Speech-to-Text Adapter Layer"]
+        AC --> Adapter["BaseSTTAdapter (Provider-Neutral)"]
+        Adapter --> Fake["DeterministicFakeTranscriber"]
+        Fake -.->|"Future Real Engine"| Whisper["Whisper / Deepgram Engine"]
+    end
+
+    subgraph StreamEvents["3. Streaming Events"]
+        Fake -->|"Interim Hypothesis"| EvtInterim["TranscriptEvent (is_final=False)"]
+        Fake -->|"Committed Segment"| EvtFinal["TranscriptEvent (is_final=True)"]
+        Fake -->|"Stream Termination"| EvtComp["TranscriptEvent (stream_completed)"]
+        Fake -->|"Failure Telemetry"| EvtError["TranscriptEvent (error detail)"]
+    end
+
+    subgraph AccumulatorLayer["4. Ordered Accumulation & Deduplication"]
+        EvtInterim -->|"Transient In-Flight"| AccInterim["Interim Hypothesis Banner"]
+        EvtFinal -->|"Bisect Insertion by start_time"| AccFinal["Chronological Final Segments"]
+        EvtComp -->|"Lifecycle Demarcation"| AccComp["Stream Completed Log"]
+        EvtError -->|"Record Error without Corrupting State"| AccErr["Error Diagnostics"]
+        AccFinal -->|"Identity Deduplication"| Dedup["Deduplicated & Verified"]
+        AccFinal -->|"Concatenation"| FullTranscript["Accumulated Final Transcript"]
+    end
+
+    subgraph Presentation["5. Verification & Observability"]
+        FullTranscript --> UI["Dashboard UI (http://127.0.0.1:8000)"]
+        AccInterim --> UI
+        Dedup --> UI
+    end
 ```
 
 ---
 
-## 3. Schema Data Contracts
+## 3. Canonical Transcript Schemas
+
+Both canonical schemas are defined uniquely in [`src/voice_stt/schemas.py`](src/voice_stt/schemas.py).
+
+### Timing Conventions
+- **Audio Time** (`start_time`, `end_time` in seconds): Measures elapsed duration from audio stream onset.
+- **Event Emission Time** (`timestamp` in seconds): Real adapters emit wall-clock POSIX time; the deterministic fake uses a simulated clock (seconds since stream start) so runs are reproducible.
+These two representations are never conflated.
 
 ### `TranscriptSegment`
-| Field | Type | Units / Constraints | Description |
-| :--- | :--- | :--- | :--- |
-| `segment_id` | `str` | UUID string | Unique segment identifier |
-| `text` | `str` | UTF-8 String | Transcribed text |
-| `start_time` | `float` | Seconds (`>= 0.0`) | Onset timestamp from stream start |
-| `end_time` | `float` | Seconds (`>= start_time`) | Offset timestamp from stream start |
-| `confidence` | `float` | Normalized `[0.0, 1.0]` | Statistical transcription confidence |
-| `is_final` | `bool` | Boolean | `True` for committed final; `False` for interim |
-| `language` | `str` | ISO 639-1 / BCP-47 (`en`, `es`, etc.) | Spoken language tag |
-| `words` | `List[WordTiming]`| List of word objects | Optional word-level alignments and confidences |
+Represents an individual recognized segment of speech.
+
+| Field | Type | Units & Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `segment_id` | `str` | Non-empty alphanumeric/UUID | No | Stable identifier for the segment. |
+| `text` | `str` | UTF-8 String | No | Transcribed content. Must be non-empty for final segments; may be empty for interim pauses. |
+| `start_time` | `float` | Seconds (`>= 0.0`, finite) | No | Audio onset timestamp relative to stream start. |
+| `end_time` | `float` | Seconds (`>= start_time`, finite) | No | Audio offset timestamp relative to stream start. |
+| `confidence` | `float` | Ratio in `[0.0, 1.0]`, finite | No | Normalized statistical confidence score. |
+| `is_final` | `bool` | Boolean | No | `True` if segment is immutable; `False` if interim hypothesis. |
+| `language` | `str` | ISO 639-1 / BCP-47 tag | No | Language identifier (e.g. `'en'`, `'en-US'`). |
+| `words` | `List[WordTiming]` | Timings within `[start, end]` | Yes | Optional word-level alignments and confidences. |
 
 ### `TranscriptEvent`
-| Field | Type | Constraints | Description |
-| :--- | :--- | :--- | :--- |
-| `event_id` | `str` | UUID string | Unique event identifier |
-| `event_type` | `TranscriptEventType`| `interim`, `final`, `error`, etc. | Nature of the stream event |
-| `sequence_number`| `int` | Monotonic integer (`>= 0`) | Sequential position in session stream |
-| `timestamp` | `float` | POSIX timestamp in seconds | Generation timestamp |
-| `session_id` | `Optional[str]` | Alphanumeric string | Optional correlation identifier |
-| `segment` | `Optional[TranscriptSegment]`| Required if `interim` or `final` | Transcribed segment payload |
-| `error` | `Optional[STTErrorDetail]` | Required if `error` | Structured diagnostic error (SDD Section 5) |
-| `metadata` | `Dict[str, Any]`| Key-value dictionary | Provider-neutral diagnostic telemetry |
+Represents a streaming event emitted by the STT adapter.
+
+| Field | Type | Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `event_id` | `str` | Non-empty UUID | No | Stable event identifier. |
+| `event_type` | `TranscriptEventType` | `interim`, `final`, `error`, `stream_completed`, etc. | No | Lifecycle event classification. |
+| `sequence_number`| `int` | Integer (`>= 0`) | No | Monotonic counter tracking stream order. |
+| `timestamp` | `float` | Seconds (`>= 0.0`, finite) | No | Emission timestamp (wall-clock for real adapters; simulated clock for fake). |
+| `session_id` | `Optional[str]` | Alphanumeric | Yes | Correlation ID linking event to user session. |
+| `segment` | `Optional[TranscriptSegment]` | Mandatory for `interim` and `final` | Yes | Associated segment payload. |
+| `error` | `Optional[STTErrorDetail]` | Mandatory for `error` | Yes | Structured error details (`code`, `message`, `request_id`, `retryable`, `details`). |
+| `metadata` | `Dict[str, Any]` | Generic dictionary | No | Diagnostic and telemetry properties. |
+
+### `STTErrorDetail`
+Standardized error payload conforming to API Specifications & Interface Contracts (doc 04), Section 5.
+
+| Field | Type | Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `code` | `str` | Non-empty string | No | Machine-readable error code (e.g., `'INVALID_PAYLOAD'`). |
+| `message` | `str` | Non-empty string | No | Human-readable explanation. Credential patterns rejected. |
+| `request_id` | `Optional[str]` | String | Yes | Correlation request ID conforming to doc 04, Section 5. |
+| `retryable` | `bool` | Boolean | No | Indicates whether client retry could resolve failure. |
+| `details` | `Dict[str, Any]` | Generic dictionary | No | Supplementary diagnostic context. |
 
 ---
 
-## 4. Quickstart & Installation
+## 4. Error Contract
 
-### Setup Environment
-```bash
-# Create and activate virtual environment
-python -m venv .venv
+Per **API Specifications & Interface Contracts (doc 04), Section 5**, standard API errors follow this envelope:
 
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-
-# Install package dependencies
-pip install -r requirements.txt
+```json
+{
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "The request is invalid.",
+    "request_id": "req-001"
+  }
+}
 ```
 
----
+The `STTErrorDetail` schema implements `.to_api_error() -> Dict[str, Any]`, producing this exact envelope:
 
-## 5. Running Tests
+```python
+from voice_stt.schemas import STTErrorDetail
 
-Run the complete 43-test unit test suite:
-```bash
-pytest -v
+error = STTErrorDetail(
+    code="INVALID_PAYLOAD",
+    message="Audio chunk duration must be positive.",
+    request_id="req-voice-1234",
+    retryable=False,
+)
+api_envelope = error.to_api_error()
+# Returns:
+# {
+#     "error": {
+#         "code": "INVALID_PAYLOAD",
+#         "message": "Audio chunk duration must be positive.",
+#         "request_id": "req-voice-1234",
+#         "retryable": False,
+#         "details": {}
+#     }
+# }
 ```
 
-All 43 unit tests cover normal operation, boundary values, invalid payload rejections, determinism audits, and lifecycle management.
+Security enforcement: `STTErrorDetail` rejects messages containing credentials (such as `sk-...`, `Bearer ...`, or passwords).
 
 ---
 
-## 6. Running the Day 7 Live Demo
+## 5. Event Lifecycle (`TranscriptEventType`)
 
-Execute the streaming chunk-to-transcript simulation:
+The STT pipeline supports the following lifecycle events:
+
+- **Active Mock Events:**
+  - `interim`: Tentative partial hypothesis in flight (`is_final=False`, `segment` present).
+  - `final`: Committed, immutable speech segment (`is_final=True`, `segment` present).
+  - `error`: Pipeline or simulated error payload (`error` present, `segment=None`).
+  - `stream_completed`: Stream termination delimiter emitted after the last chunk and its final segment (`segment=None`, `error=None`).
+- **Reserved Events (for future real-provider VAD adapters):**
+  - `speech_started`: Voice Activity Detection (VAD) speech onset trigger.
+  - `speech_ended`: Voice Activity Detection (VAD) speech silence/offset trigger.
+
+> **Fixture mode behaviour:** When `DeterministicFakeTranscriber` is configured with a named fixture, it emits exactly **one fixture event per audio chunk** and does **not** emit a `STREAM_COMPLETED` event. `STREAM_COMPLETED` is only emitted in scripted and hash modes at end of stream.
+
+---
+
+## 6. Canonical Named Fixtures
+
+Defined in [`src/voice_stt/fixtures.py`](src/voice_stt/fixtures.py):
+
+| Fixture | Name | Persona | What It Proves |
+| :---: | :--- | :--- | :--- |
+| **A** | **Normal Multi-Segment** | Student Developer | Split across 2 chronological segments (*"Why is this application"* &rarr; *"showing this error?"*). |
+| **B** | **Interim-to-Final Lifecycle** | Research Student | 4 progressive interim hypotheses culminating in 1 finalized segment. |
+| **C** | **Out-of-Order Delivery** | General User | Segments dispatched in order [2, 3, 1]; accumulator correctly sorts them by audio `start_time`. |
+| **D** | **Duplicate Delivery** | System Monitor | Repeated delivery of identical event suppressed without duplicating final text. |
+| **E** | **Invalid Payload Rejection** | Fault Injection | Malformed payload (`end_time < start_time`, `confidence > 1.0`) rejected; accumulator state preserved. |
+| **F** | **Simulated Adapter Failure** | Resilience Tester | Controlled failure event emitted; verified error state and clean recovery via reset. |
+
+> **Note on fixture timestamps:** All named fixtures use fixed hardcoded sample audio timestamps (e.g., Fixture A: `0.0s–0.8s`, `0.8s–1.5s`). These are illustrative audio time spans, not real-time wall-clock values.
+
+---
+
+## 7. Running the Automated Test Suite
+
+The test suite contains **81 passing unit tests** covering normal, boundary, failure, and contract behaviors:
+
 ```bash
-# Real-time streaming simulation with visual updates:
+# Cross-platform
+python -m pytest -v
+
+# Windows PowerShell
+.\.venv\Scripts\python.exe -m pytest -v
+```
+
+### Coverage Highlights:
+- **Schemas**: Valid/invalid segments, boundary timestamps, non-finite values (NaN, Inf), empty text policies, doc-04 error envelopes, and secret redaction.
+- **Adapter**: Abstract lifecycle, context manager, state transitions, lookahead stream flushing, and `AudioChunk.is_last` handling.
+- **Determinism**: Multi-pass bit-for-bit repeatability across scripted and hash modes including `STREAM_COMPLETED`.
+- **Accumulator**: Audio chronological ordering, out-of-order reordering, identity deduplication, late interim protection, equal timestamp handling, and no stale chunk telemetry.
+
+---
+
+## 8. Running the Demonstrations
+
+### Option 1: Interactive Web Dashboard (Optional Extra Scope)
+Start the localhost server (binds `127.0.0.1` only):
+```bash
+# Cross-platform
+python demo/server.py
+
+# Windows PowerShell
+.\.venv\Scripts\python.exe demo/server.py
+```
+Open your browser to:
+👉 **`http://localhost:8000`** (or `http://127.0.0.1:8000`)
+
+*Note: Dashboard routes are namespaced under `/demo` (`/demo/health`, `/demo/stream`, `/demo/audit`, `/demo/reset`) to prevent collision with Backend team `/api/v1` routes.*
+
+### Option 2: CLI Demonstration Script
+Run individual fixtures or all fixtures from the command line:
+```bash
+# Cross-platform
 python demo/live_demo.py
+python demo/live_demo.py --fixture C
+python demo/live_demo.py --all
 
-# Non-interactive / CI fast execution:
-python demo/live_demo.py --fast
-```
-
-Sample output:
-```text
-========================================================================
-   AI Voice Co-Pilot (W2 - STT Foundation) - Day 7 Live Demonstration
-   Author: Disha D K (SDE 3) | Workstream: Speech-to-Text Pipeline
-   Mode: Mock / Deterministic (No paid API keys required)
-========================================================================
-
-[*] Initialized STT Adapter: deterministic-mock-v1
-[*] Target Utterance Scenario: 2 phrases
-[*] Streaming 20 audio chunks (100ms each) into adapter...
-------------------------------------------------------------------------
-  [STREAMING INTERIM] t=0.0s..0.1s | Why                                           (conf: 0.88)
-  ...
-  [COMMITTED FINAL ]  t=0.6s..0.7s | "Why is this application showing this error?" (conf: 0.96)
-  ...
-  [COMMITTED FINAL ]  t=1.3s..1.4s | "Explain the methodology shown on this page." (conf: 0.96)
-
-------------------------------------------------------------------------
-   ACCUMULATOR CONSOLIDATED TRANSCRIPT & METRICS
-------------------------------------------------------------------------
-  Total Committed Segments : 2
-  Events Ingested          : 14
-  Total Audio Duration     : 0.80 seconds
-  Average Confidence       : 96.00%
-
-  Full Transcript Reconstructed:
-  >>> "Why is this application showing this error? Explain the methodology shown on this page."
-
-------------------------------------------------------------------------
-   DETERMINISM AUDIT (Pass 1 vs Pass 2 bit-for-bit check)
-------------------------------------------------------------------------
-  Event Count Pass 1 : 14
-  Event Count Pass 2 : 14
-  Exact Bit-for-Bit Match : PASSED (100% Deterministic)
-========================================================================
-   Day 7 Live Demonstration Complete! All criteria met.
-========================================================================
+# Windows PowerShell
+.\.venv\Scripts\python.exe demo/live_demo.py --all
 ```
 
 ---
 
-## 7. Acceptance Criteria Checklist
+## 9. Pull Request Checklist
 
-- [x] **Single Schema Definition:** Both `TranscriptSegment` and `TranscriptEvent` are defined once in `src/voice_stt/schemas.py`.
-- [x] **Field Documentation:** All fields documented with types, physical units (seconds, normalized confidence), and constraints.
-- [x] **Payload Validation:** Clear validation errors on inverted timestamps, negative offsets, confidence out of `[0.0, 1.0]`, invalid language tags, and mismatched event states.
-- [x] **Deterministic Transcriber:** Repeated execution with identical audio chunk inputs produces identical `TranscriptEvent` sequences.
-- [x] **Provider-Neutral Interface:** `BaseSTTAdapter` requires no real provider or paid API keys.
-- [x] **Ordered Accumulator:** Out-of-order segments automatically ordered chronologically; interim hypotheses cleanly separated from committed final segments.
-- [x] **Test Suite Passing:** 43 comprehensive unit tests passing with 100% success rate.
-- [x] **Feature Branch:** All development on `feature/w2-speech-to-text-foundation`; zero direct pushes to `main`.
-- [x] **Zero Secrets / Personal Data:** `.gitignore` excludes audio recordings, secrets, `.env`, and virtual environments.
-- [x] **Day 7 Live Demo:** `demo/live_demo.py` ready and verified.
-
+- [x] All 81 automated tests pass locally.
+- [x] Working branch is `feature/w2-speech-to-text-foundation` (zero direct pushes to `main`).
+- [x] No secrets, `.env` files, audio recordings, or credentials committed.
+- [x] Canonical schemas defined once in `src/voice_stt/schemas.py`.
+- [x] Provider-neutral adapter and deterministic fake transcriber verified.
+- [x] Ordered accumulator handles chronological ordering, duplicates, and late interims.
+- [x] Day 7 live demo verified on localhost and CLI.

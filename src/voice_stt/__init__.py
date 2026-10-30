@@ -4,6 +4,7 @@ This package provides:
 - Core transcript schemas (TranscriptSegment, TranscriptEvent, STTErrorDetail)
 - Provider-neutral STT adapter interface (BaseSTTAdapter)
 - Deterministic fake transcriber for offline/mock development (DeterministicFakeTranscriber)
+- Canonical named demonstration and diagnostic fixtures (STTFixture, get_fixture, get_all_fixtures)
 - Ordered segment accumulator for real-time speech streaming (OrderedSegmentAccumulator)
 """
 
@@ -22,6 +23,11 @@ from voice_stt.adapter import (
     STTAdapterStatus,
     STTAdapterState,
 )
+from voice_stt.fixtures import (
+    STTFixture,
+    get_fixture,
+    get_all_fixtures,
+)
 from voice_stt.fake_transcriber import DeterministicFakeTranscriber
 from voice_stt.accumulator import OrderedSegmentAccumulator
 
@@ -37,7 +43,9 @@ __all__ = [
     "STTAdapterConfig",
     "STTAdapterStatus",
     "STTAdapterState",
+    "STTFixture",
+    "get_fixture",
+    "get_all_fixtures",
     "DeterministicFakeTranscriber",
     "OrderedSegmentAccumulator",
 ]
-

@@ -186,3 +186,33 @@ class TestOrderedSegmentAccumulator:
         assert accumulator.get_total_duration() == 0.0
         assert accumulator.get_average_confidence() == 0.0
 
+    def test_summary_has_no_stale_chunks_processed_counter(self) -> None:
+        """The accumulator consumes events, not chunks; verify chunks_processed is absent."""
+        accumulator = OrderedSegmentAccumulator()
+        summary = accumulator.get_summary()
+        assert "chunks_processed" not in summary
+        assert not hasattr(accumulator, "_chunks_processed")
+
+    def test_stream_completed_event_ingestion_preserves_final_segments(
+        self, valid_final_segment: TranscriptSegment
+    ) -> None:
+        """Lifecycle STREAM_COMPLETED event is ingested safely without altering committed segments."""
+        accumulator = OrderedSegmentAccumulator()
+        accumulator.ingest_segment(valid_final_segment)
+        assert accumulator.final_count == 1
+
+        completed_event = TranscriptEvent(
+            event_id="evt-completed-001",
+            event_type=TranscriptEventType.STREAM_COMPLETED,
+            sequence_number=99,
+            timestamp=2.5,
+            segment=None,
+            error=None,
+        )
+        # Should ingest successfully
+        processed = accumulator.ingest_event(completed_event)
+        assert processed is True
+        assert accumulator.final_count == 1
+        assert accumulator.get_final_segments()[0].text == valid_final_segment.text
+        assert accumulator.get_full_transcript() == valid_final_segment.text
+

@@ -142,6 +142,11 @@ class TestTranscriptSegmentSchema:
         assert restored.confidence == valid_final_segment.confidence
         assert restored.is_final == valid_final_segment.is_final
 
+    def test_transcript_segment_immutability(self, valid_final_segment: TranscriptSegment) -> None:
+        """TranscriptSegment is frozen and rejects attribute reassignment after creation."""
+        with pytest.raises(ValidationError):
+            valid_final_segment.text = "Attempted text mutation"  # type: ignore[misc]
+
 
 class TestTranscriptEventSchema:
     """Tests for TranscriptEvent streaming contract and lifecycle validation."""
@@ -224,6 +229,75 @@ class TestTranscriptEventSchema:
                 error=None,
             )
         assert "require a non-null 'error' payload" in str(exc_info.value)
+
+
+class TestSTTErrorDetailSchema:
+    """Tests for STTErrorDetail conforming to API Specifications & Interface Contracts (doc 04), Section 5."""
+
+    def test_error_detail_without_request_id(self) -> None:
+        err = STTErrorDetail(code="AUDIO_DECODE_FAILED", message="Unable to parse WAV header.")
+        assert err.code == "AUDIO_DECODE_FAILED"
+        assert err.message == "Unable to parse WAV header."
+        assert err.request_id is None
+        assert err.retryable is False
+        assert err.details == {}
+
+    def test_error_detail_with_request_id(self) -> None:
+        err = STTErrorDetail(
+            code="INVALID_PAYLOAD",
+            message="Payload missing required fields.",
+            request_id="req-voice-001",
+            retryable=True,
+            details={"chunk_id": "chk-99"},
+        )
+        assert err.request_id == "req-voice-001"
+        assert err.retryable is True
+        assert err.details == {"chunk_id": "chk-99"}
+
+    def test_to_api_error_shape(self) -> None:
+        err = STTErrorDetail(
+            code="INVALID_REQUEST",
+            message="The request is invalid.",
+            request_id="req-001",
+            retryable=False,
+            details={"field": "timestamp"},
+        )
+        api_dict = err.to_api_error()
+        assert "error" in api_dict
+        inner = api_dict["error"]
+        assert inner["code"] == "INVALID_REQUEST"
+        assert inner["message"] == "The request is invalid."
+        assert inner["request_id"] == "req-001"
+        assert inner["retryable"] is False
+        assert inner["details"] == {"field": "timestamp"}
+
+    def test_to_api_error_without_request_id_keeps_key(self) -> None:
+        err = STTErrorDetail(code="RATE_LIMIT", message="Too many requests.")
+        api_dict = err.to_api_error()
+        assert "error" in api_dict
+        assert api_dict["error"]["code"] == "RATE_LIMIT"
+        assert api_dict["error"]["message"] == "Too many requests."
+        assert api_dict["error"]["request_id"] is None
+
+    def test_reject_secrets_in_error_message(self) -> None:
+        with pytest.raises((ValidationError, STTValidationError)) as exc_info:
+            STTErrorDetail(
+                code="AUTH_FAILURE",
+                message="Authentication failed for key sk-abcdef123456789012345678",
+            )
+        assert "sensitive credential data" in str(exc_info.value)
+
+        with pytest.raises((ValidationError, STTValidationError)):
+            STTErrorDetail(
+                code="AUTH_FAILURE",
+                message="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+            )
+
+        with pytest.raises((ValidationError, STTValidationError)):
+            STTErrorDetail(
+                code="AUTH_FAILURE",
+                message="Invalid password: secretpassword123",
+            )
 
 
 class TestAudioChunkSchema:

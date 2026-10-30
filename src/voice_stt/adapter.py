@@ -5,6 +5,21 @@ speech-to-text engines in AI Voice Co-Pilot (W2). It abstracts underlying
 providers (e.g. Whisper, Google Cloud Speech, Deepgram, or Mock transcribers)
 ensuring higher-level orchestrators are completely decoupled from concrete
 STT implementations and paid APIs.
+
+Architecture Contract:
+1. Inputs:
+   - Streaming slices of audio (`AudioChunk` or raw `bytes`).
+   - Slices indicate sample rate, sequence counter, and end-of-speech flag (`is_last`).
+2. Outputs:
+   - Synchronous or streamed `TranscriptEvent` sequences.
+   - Events conform strictly to `TranscriptEventType` ('interim', 'final', 'error', 'stream_completed').
+   - Lifecycle events 'speech_started' and 'speech_ended' are reserved for real provider adapters.
+3. Extensibility:
+   - Future commercial engines (e.g. OpenAI Whisper, Deepgram Nova-2, Google Cloud STT)
+     can be integrated by subclassing `BaseSTTAdapter` without modifying `OrderedSegmentAccumulator`
+     or transcript schemas.
+4. Offline / Mock Mode:
+   - Full mock execution without paid API keys, network traffic, or hardware microphones.
 """
 
 from __future__ import annotations
@@ -163,16 +178,30 @@ class BaseSTTAdapter(ABC):
     ) -> Iterator[TranscriptEvent]:
         """Consume an iterable stream of audio chunks and yield transcript events.
 
+        Uses one-item lookahead so the final chunk of the stream is treated with
+        is_last=True, flushing any pending words. An empty stream yields nothing.
+
         Args:
             stream: Iterable yielding AudioChunk objects or raw audio bytes.
 
         Yields:
             TranscriptEvent instances as transcription progresses.
         """
-        for chunk in stream:
-            events = self.transcribe_chunk(chunk)
+        it = iter(stream)
+        try:
+            prev = next(it)
+        except StopIteration:
+            return
+
+        for current in it:
+            events = self.transcribe_chunk(prev, is_last=getattr(prev, "is_last", False))
             for event in events:
                 yield event
+            prev = current
+
+        events = self.transcribe_chunk(prev, is_last=True)
+        for event in events:
+            yield event
 
     @abstractmethod
     def reset(self) -> None:
@@ -201,6 +230,8 @@ class BaseSTTAdapter(ABC):
     ) -> AudioChunk:
         """Helper to normalize raw bytes into a strongly-typed AudioChunk."""
         if isinstance(chunk, AudioChunk):
+            if is_last and not chunk.is_last:
+                return chunk.model_copy(update={"is_last": True})
             return chunk
         elif isinstance(chunk, (bytes, bytearray)):
             return AudioChunk(
@@ -220,4 +251,3 @@ class BaseSTTAdapter(ABC):
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
-

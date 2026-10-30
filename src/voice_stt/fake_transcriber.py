@@ -2,8 +2,8 @@
 
 This transcriber implements the BaseSTTAdapter interface in mock mode without
 requiring external cloud APIs or credentials. It guarantees strict determinism:
-identical audio chunk sequences produce identical TranscriptEvents (matching
-event_id, timestamps, confidence, text, and is_final flags).
+identical audio chunk sequences or fixture inputs produce identical TranscriptEvents
+(matching event_id, timestamps, confidence, text, and is_final flags).
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from voice_stt.adapter import (
     STTAdapterConfig,
     STTAdapterState,
 )
+from voice_stt.fixtures import STTFixture, get_fixture
 from voice_stt.schemas import (
     AudioChunk,
     STTErrorDetail,
@@ -26,7 +27,6 @@ from voice_stt.schemas import (
     WordTiming,
 )
 
-# Canonical sample vocabulary for hash-based deterministic transcription
 DEFAULT_VOCABULARY: Sequence[str] = (
     "explain",
     "this",
@@ -63,12 +63,14 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
     - Zero external network dependencies or API keys.
     - Deterministic event IDs, timestamps, words, and confidence scores.
     - Generates realistic streaming flow: interim hypothesis -> finalized segment.
+    - Direct support for canonical demonstration fixtures (A through F).
     """
 
     def __init__(
         self,
         config: Optional[STTAdapterConfig] = None,
         script: Optional[Sequence[str]] = None,
+        fixture: Optional[STTFixture] = None,
         seed: int = 42,
         inject_error_at_chunk: Optional[int] = None,
         error_detail: Optional[STTErrorDetail] = None,
@@ -77,13 +79,14 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
 
         Args:
             config: Optional adapter configuration.
-            script: Optional sequence of target phrases/sentences. If provided,
-                chunks progressively advance through this script.
+            script: Optional sequence of target phrases/sentences.
+            fixture: Optional STTFixture to replay deterministically.
             seed: Numerical seed ensuring deterministic event IDs and metrics.
             inject_error_at_chunk: Sequence index of chunk at which to emit an error event.
             error_detail: Custom error information to emit when error injection triggers.
         """
         super().__init__(config)
+        self.fixture = fixture
         self.script: Optional[List[str]] = list(script) if script else None
         self.seed = seed
         self.inject_error_at_chunk = inject_error_at_chunk
@@ -97,9 +100,17 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         # Internal state tracking
         self._current_script_idx: int = 0
         self._current_word_idx: int = 0
+        self._current_fixture_event_idx: int = 0
         self._elapsed_time: float = 0.0
         self._accumulated_words: List[str] = []
         self._active_sentence_words: List[str] = []
+        self._sentence_start: Optional[float] = None
+
+    @classmethod
+    def from_fixture(cls, fixture_id: str, seed: int = 42) -> DeterministicFakeTranscriber:
+        """Factory creating a transcriber configured to replay a canonical fixture."""
+        f = get_fixture(fixture_id)
+        return cls(fixture=f, seed=seed)
 
     def _deterministic_uuid(self, salt: str) -> str:
         """Derive an RFC-4122 compliant deterministic UUID5 string."""
@@ -125,9 +136,11 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         self._events_emitted = 0
         self._current_script_idx = 0
         self._current_word_idx = 0
+        self._current_fixture_event_idx = 0
         self._elapsed_time = 0.0
         self._accumulated_words.clear()
         self._active_sentence_words.clear()
+        self._sentence_start = None
         self._last_error = None
         self._state = STTAdapterState.READY
 
@@ -136,15 +149,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         chunk: AudioChunk | bytes,
         is_last: bool = False,
     ) -> List[TranscriptEvent]:
-        """Process an audio chunk deterministically and return transcript events.
-
-        Args:
-            chunk: AudioChunk or raw audio bytes.
-            is_last: End-of-stream flag.
-
-        Returns:
-            List of TranscriptEvent objects.
-        """
+        """Process an audio chunk deterministically and return transcript events."""
         if self._state == STTAdapterState.CLOSED:
             raise RuntimeError("Cannot transcribe on a closed STT adapter.")
 
@@ -177,13 +182,47 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
 
         events: List[TranscriptEvent] = []
 
-        if self.script is not None:
+        if self.fixture is not None:
+            events.extend(self._process_fixture_chunk(audio))
+        elif self.script is not None:
             events.extend(self._process_scripted_chunk(audio, chunk_start, chunk_end))
         else:
             events.extend(self._process_hash_chunk(audio, chunk_start, chunk_end))
 
+        if audio.is_last and self.fixture is None:
+            stream_completed_event = TranscriptEvent(
+                event_id=self._deterministic_uuid(f"stream-completed-{chunk_seq}"),
+                event_type=TranscriptEventType.STREAM_COMPLETED,
+                sequence_number=self._events_emitted,
+                timestamp=chunk_end,
+                session_id=self._session_id,
+                segment=None,
+                error=None,
+                metadata={"chunk_seq": chunk_seq},
+            )
+            self._events_emitted += 1
+            events.append(stream_completed_event)
+
         self._chunks_processed += 1
         self._state = STTAdapterState.READY
+        return events
+
+    def _process_fixture_chunk(self, audio: AudioChunk) -> List[TranscriptEvent]:
+        """Replay events from a pre-configured canonical fixture."""
+        events: List[TranscriptEvent] = []
+        if not self.fixture or not self.fixture.events:
+            return events
+
+        if self._current_fixture_event_idx < len(self.fixture.events):
+            evt = self.fixture.events[self._current_fixture_event_idx]
+            self._current_fixture_event_idx += 1
+            events.append(evt)
+            self._events_emitted += 1
+
+            if evt.event_type == TranscriptEventType.ERROR:
+                self._state = STTAdapterState.ERROR
+                self._last_error = evt.error
+
         return events
 
     def _process_scripted_chunk(
@@ -195,7 +234,6 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         """Emit deterministic events driven by pre-configured script."""
         events: List[TranscriptEvent] = []
         if not self.script or self._current_script_idx >= len(self.script):
-            # Script exhausted; return empty or final heartbeat
             if audio.is_last and self._active_sentence_words:
                 events.append(self._flush_active_sentence(chunk_start, chunk_end))
             return events
@@ -204,23 +242,21 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         tokens = target_sentence.strip().split()
 
         if self._current_word_idx < len(tokens):
+            if self._sentence_start is None:
+                self._sentence_start = chunk_start
             new_word = tokens[self._current_word_idx]
             self._active_sentence_words.append(new_word)
             self._current_word_idx += 1
 
-            is_sentence_complete = (
-                self._current_word_idx >= len(tokens)
-                or audio.is_last
-                or (self._current_script_idx == len(self.script) - 1 and audio.is_last)
-            )
+            is_last_in_script = (self._current_script_idx == len(self.script) - 1 and audio.is_last)
+            is_sentence_complete = bool(self._current_word_idx >= len(tokens) or audio.is_last or is_last_in_script)
 
-            # Check if interim results enabled and not yet complete
             if not is_sentence_complete and self.config.interim_results:
                 interim_text = " ".join(self._active_sentence_words)
                 interim_segment = TranscriptSegment(
                     segment_id=self._deterministic_uuid(f"seg-interim-{self._chunks_processed}"),
                     text=interim_text,
-                    start_time=chunk_start,
+                    start_time=self._sentence_start if self._sentence_start is not None else chunk_start,
                     end_time=chunk_end,
                     confidence=0.88,
                     is_final=False,
@@ -248,15 +284,21 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
 
     def _flush_active_sentence(self, chunk_start: float, chunk_end: float) -> TranscriptEvent:
         """Create a finalized TranscriptEvent for the active sentence."""
+        sentence_start = self._sentence_start if self._sentence_start is not None else chunk_start
+        sentence_end = chunk_end
         sentence_text = " ".join(self._active_sentence_words)
         word_count = max(1, len(self._active_sentence_words))
-        time_per_word = max(0.01, (chunk_end - chunk_start) / word_count)
+        time_per_word = max(0.001, (sentence_end - sentence_start) / word_count)
 
         words_timing = [
             WordTiming(
                 word=w,
-                start_time=chunk_start + i * time_per_word,
-                end_time=chunk_start + (i + 1) * time_per_word,
+                start_time=sentence_start + i * time_per_word,
+                end_time=(
+                    sentence_end
+                    if i == len(self._active_sentence_words) - 1
+                    else sentence_start + (i + 1) * time_per_word
+                ),
                 confidence=0.95,
             )
             for i, w in enumerate(self._active_sentence_words)
@@ -265,8 +307,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         final_segment = TranscriptSegment(
             segment_id=self._deterministic_uuid(f"seg-final-{self._chunks_processed}"),
             text=sentence_text,
-            start_time=chunk_start,
-            end_time=chunk_end,
+            start_time=sentence_start,
+            end_time=sentence_end,
             confidence=0.96,
             is_final=True,
             language=self.config.language,
@@ -276,13 +318,14 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             event_id=self._deterministic_uuid(f"evt-final-{self._chunks_processed}"),
             event_type=TranscriptEventType.FINAL,
             sequence_number=self._events_emitted,
-            timestamp=chunk_end,
+            timestamp=sentence_end,
             session_id=self._session_id,
             segment=final_segment,
             metadata={"sentence_index": self._current_script_idx},
         )
         self._events_emitted += 1
         self._active_sentence_words.clear()
+        self._sentence_start = None
         return evt
 
     def _process_hash_chunk(
@@ -295,24 +338,23 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         events: List[TranscriptEvent] = []
         h = self._hash_bytes(audio.data)
 
-        # Deterministically select word from vocabulary
         vocab_len = len(DEFAULT_VOCABULARY)
         word_idx = h % vocab_len
         selected_word = DEFAULT_VOCABULARY[word_idx]
 
-        self._active_sentence_words.append(selected_word)
+        if self._sentence_start is None:
+            self._sentence_start = chunk_start
 
-        # Finalize sentence every 3 chunks or when is_last is True
+        self._active_sentence_words.append(selected_word)
         should_finalize = (len(self._active_sentence_words) >= 3) or audio.is_last
 
         if not should_finalize and self.config.interim_results:
             interim_text = " ".join(self._active_sentence_words)
-            # Confidence derived deterministically: 0.80 to 0.90
             conf = 0.80 + ((h % 100) / 1000.0)
             interim_segment = TranscriptSegment(
                 segment_id=self._deterministic_uuid(f"hash-seg-interim-{audio.sequence_number}"),
                 text=interim_text,
-                start_time=chunk_start,
+                start_time=self._sentence_start if self._sentence_start is not None else chunk_start,
                 end_time=chunk_end,
                 confidence=round(conf, 4),
                 is_final=False,
@@ -330,17 +372,22 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             )
             self._events_emitted += 1
         elif should_finalize:
+            sentence_start = self._sentence_start if self._sentence_start is not None else chunk_start
+            sentence_end = chunk_end
             final_text = " ".join(self._active_sentence_words)
-            # Final confidence derived deterministically: 0.92 to 0.99
             conf = 0.92 + ((h % 70) / 1000.0)
             word_count = len(self._active_sentence_words)
-            time_per_word = max(0.01, (chunk_end - chunk_start) / max(1, word_count))
+            time_per_word = max(0.001, (sentence_end - sentence_start) / max(1, word_count))
 
             words_timing = [
                 WordTiming(
                     word=w,
-                    start_time=chunk_start + i * time_per_word,
-                    end_time=chunk_start + (i + 1) * time_per_word,
+                    start_time=sentence_start + i * time_per_word,
+                    end_time=(
+                        sentence_end
+                        if i == len(self._active_sentence_words) - 1
+                        else sentence_start + (i + 1) * time_per_word
+                    ),
                     confidence=round(conf, 4),
                 )
                 for i, w in enumerate(self._active_sentence_words)
@@ -349,8 +396,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             final_segment = TranscriptSegment(
                 segment_id=self._deterministic_uuid(f"hash-seg-final-{audio.sequence_number}"),
                 text=final_text,
-                start_time=chunk_start,
-                end_time=chunk_end,
+                start_time=sentence_start,
+                end_time=sentence_end,
                 confidence=round(conf, 4),
                 is_final=True,
                 language=self.config.language,
@@ -361,13 +408,13 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
                     event_id=self._deterministic_uuid(f"hash-evt-final-{audio.sequence_number}"),
                     event_type=TranscriptEventType.FINAL,
                     sequence_number=self._events_emitted,
-                    timestamp=chunk_end,
+                    timestamp=sentence_end,
                     session_id=self._session_id,
                     segment=final_segment,
                 )
             )
             self._events_emitted += 1
             self._active_sentence_words.clear()
+            self._sentence_start = None
 
         return events
-
