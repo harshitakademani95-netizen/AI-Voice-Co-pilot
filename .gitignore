@@ -1,9 +1,11 @@
-# Python
+# Python Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -23,6 +25,32 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+.mypy_cache/
+.ruff_cache/
+.pyrefly/
+
 # Virtual Environments
 .venv/
 venv/
@@ -31,14 +59,8 @@ env/
 .env
 .env.*
 .env.local
-
-# Testing and Type Checking
-.pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-.pyrefly/
+env.bak/
+venv.bak/
 
 # Audio / Media Recordings (PR requirement: no secrets/recordings/personal data)
 *.wav
@@ -68,6 +90,7 @@ credentials.json
 .idea/
 *.swp
 *.swo
+*~
 .DS_Store
 Thumbs.db
 

@@ -1,3 +1,364 @@
+# AI Voice Co-Pilot (Week 1 Foundation & Vertical Slice)
+
+**Team:** SDE 3  
+**Status:** Integrated & Passing  
+**Architecture:** Multi-Workstream Voice Assistant System
+
+---
+
+## Executive Overview & Workstream Directory
+
+The **AI Voice Co-Pilot** is an intelligent assistant combining voice capture, speech recognition, multimodal context extraction, deterministic reasoning, agentic workflow orchestration with human-in-the-loop safety gating, and a robust session backend.
+
+| Workstream | Subsystem / Focus | Lead Engineer | Status | Key Artifacts |
+| :--- | :--- | :--- | :--- | :--- |
+| **W1** | Audio Capture & VAD | Harshita G Kademani | Ready | `src/audio/`, `src/schemas/audio.py` |
+| **W2** | Speech-to-Text Foundation | Disha D K | Ready | `src/voice_stt/`, `demo/live_demo.py` |
+| **W3** | Context & Reasoning Engine | Amruta A J | Ready | `src/context/`, `src/reasoning/`, `web/` |
+| **W4** | Agentic Workflow Engine | Suhani A | Ready | `agentic_workflow/`, `server.py` |
+| **W5** | Backend & Sessions Layer | Vaishnavi G | Ready | `src/app.py`, `src/routes/`, `run_mock.py` |
+| **W6** | Frontend & UX | Varsha B S | Ready | `src/App.tsx`, `package.json` |
+
+---
+
+## Unified Execution & Quickstart Guide
+
+### 1. Interactive Multi-Workstream Demonstration
+Run the consolidated Day 7 vertical slice demonstrations across both Agentic Workflow (W4) and Context & Reasoning (W3):
+```powershell
+python demo.py
+```
+Or run a specific workstream:
+```powershell
+python demo.py --workstream w4      # Agentic Workflow demo
+python demo.py --workstream w3      # Context & Reasoning demo
+python scripts/demo_day7.py         # Backend & Sessions demo (W5)
+python demo/live_demo.py            # Speech-to-Text pipeline demo (W2)
+```
+
+### 2. Localhost Interactive Web Server
+Start the unified interactive web server providing the Agentic Workflow state visualizer, safety gates, and Context & Reasoning dashboard:
+```powershell
+python server.py
+```
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
+
+### 3. One-Command Mock Backend Launcher (W5)
+Launch the FastAPI session backend with zero cloud dependencies:
+```powershell
+python run_mock.py
+```
+Interactive Swagger API documentation is available at **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**.
+
+### 4. Running Automated Tests
+Run the standalone test suite:
+```powershell
+python run_tests.py
+```
+
+---
+
+# Agentic Workflow Engine (Week 1 Foundation)
+
+**Team:** SDE 3  
+**Student:** Suhani A  
+**Workstream:** W4 – Agentic Workflow  
+**Duration:** Day 1–Day 7 (Week 1 – Foundation and First Vertical Slice)
+
+---
+
+## 1. Project Purpose and Scope
+The goal of this project is to build the foundation of an Agentic Workflow Engine for the AI Voice Co-Pilot system. The engine manages structured workflow plans, enforces lifecycle states through a deterministic state machine, operates exactly two harmless mock tools in simulated mode, and enforces a strict Human-in-the-Loop safety gate where any consequential action defaults to awaiting approval.
+
+Everything runs strictly in mock mode with zero external network access, zero real API calls, and zero operating-system control.
+
+---
+
+## 2. Project Structure
+```
+AI voicebot/
+├── .gitignore                      # Git ignore rules for Python, caches, and environments
+├── requirements.txt                # Project dependencies (pydantic, pytest)
+├── README.md                       # Complete documentation and execution guide
+├── demo.py                         # Day 7 demonstration script
+├── server.py                       # Local interactive web dashboard and REST API (127.0.0.1)
+├── agentic_workflow/
+│   ├── __init__.py                 # Package exports and public interface
+│   ├── schemas.py                  # Pydantic models for all 5 workflow schemas (extra="forbid")
+│   ├── state_machine.py            # 7-state lifecycle machine with transition table
+│   ├── tools.py                    # Exactly two harmless mock tools and tool registry
+│   └── executor.py                 # Single-use approval executor with safety gate
+└── tests/
+    ├── __init__.py
+    ├── test_schemas.py             # Schema validation and invalid plan tests
+    ├── test_state_machine.py       # Legal and illegal state transition tests
+    ├── test_executor.py            # Safety gate, mock tool execution, and regression tests
+    └── test_server_api.py          # HTTP API security, CSRF token, and approval tests
+```
+
+---
+
+## 3. The Five Typed Workflow Schemas (`agentic_workflow/schemas.py`)
+All five schemas are defined once using Pydantic V2 with `model_config = ConfigDict(extra="forbid")`:
+
+1. **`WorkflowPlan`**:
+   - Fields: `workflow_id`, `run_id`, `description`, `steps` (List[WorkflowStep]), `metadata`, `state`, `created_at`.
+   - Validation: Rejects empty plans, duplicate `step_id`s, unknown step dependencies, self-dependencies, forward dependencies (dependencies must appear earlier in the step list), and cyclic dependencies.
+2. **`WorkflowStep`**:
+   - Fields: `step_id`, `name`, `tool_name`, `inputs`, `is_consequential`, `dependencies`, `status`, `output`, `error`.
+   - Validation: Strict keyword initialization; missing required fields raise `ValidationError`.
+3. **`ToolSpec`**:
+   - Fields: `name`, `description`, `input_requirements`, `is_consequential`, `risk_level`.
+   - Validation: Declares tool schema, safety rating, and whether actions default to awaiting approval.
+4. **`ApprovalRequest`**:
+   - Fields: `approval_id`, `workflow_id`, `run_id`, `step_id`, `tool_name`, `inputs`, `reason`, `risk_level`, `status`, `decided_by`, `decision_details`, `is_consumed`, `created_at`, `resolved_at`.
+   - Methods: `approve(by, comment)`, `reject(by, comment)`, and `consume()`. Single-use: once consumed by step execution, it cannot authorize another run.
+5. **`WorkflowResult`**:
+   - Fields: `workflow_id`, `final_state`, `step_outputs`, `executed_step_ids`, `approval_requests`, `error`, `start_time`, `end_time`, `summary`.
+   - Provides a serializable audit trace of plan execution.
+
+---
+
+## 4. State Machine (`agentic_workflow/state_machine.py`)
+
+The state machine implements all seven lifecycle states:
+- `draft`: Initial creation and validation state.
+- `awaiting_approval`: Safety gate paused for human authorization.
+- `running`: Steps actively executing.
+- `paused`: Temporarily suspended execution.
+- `succeeded`: Terminal state indicating successful completion of all steps.
+- `failed`: Terminal state indicating unhandled step or dependency failure.
+- `cancelled`: Terminal state indicating user cancellation or denied approval.
+
+### State Transition Diagram
+```
+    [draft]
+      │
+      ├──> [running] (direct if initial step non-consequential)
+      │          │
+      ├──> [awaiting_approval] <──┐
+      │          │                 │ (consequential action encountered)
+      │          ├──> [running] ───┘
+      │          │        │
+      │          │        ├──> [paused] ──> [running]
+      │          │        │       │
+      │          │        │       ├──> [cancelled]
+      │          │        │       └──> [failed]
+      │          │        │
+      │          │        ├──> [succeeded] (Terminal)
+      │          │        ├──> [failed]    (Terminal)
+      │          │        └──> [cancelled] (Terminal)
+      │          │
+      │          └──> [cancelled] / [failed]
+      │
+      └──> [cancelled] / [failed]
+```
+
+### Transition Guardrails:
+- **Terminal Protection**: Terminal states (`succeeded`, `failed`, `cancelled`) cannot transition to any state, including transitions to themselves. Any attempt raises `InvalidStateTransitionError`.
+- **Illegal Transitions**: Transitions such as `draft` &rarr; `succeeded` or `awaiting_approval` &rarr; `paused` are rejected immediately.
+- **Completed Workflow Lock**: Workflows in terminal states cannot be executed again without creating a new plan instance or an explicit reset.
+
+---
+
+## 5. Exactly Two Harmless Mock Tools (`agentic_workflow/tools.py`)
+
+Only the following two registered mock tools exist in the system:
+
+1. **Tool 1: Mock Task Checker (`mock_task_checker`)**:
+   - **Type**: Informational / Safe Read (`is_consequential = False`, `RiskLevel.INFORMATIONAL`).
+   - **Inputs**: `{"task_id": str}`
+   - **Behavior**: Inspects local in-memory database and returns simulated task metrics.
+   - **Policy**: Executes automatically without requiring approval.
+
+2. **Tool 2: Mock Report Generator (`mock_report_generator`)**:
+   - **Type**: Consequential Action (`is_consequential = True`, `RiskLevel.SENSITIVE`).
+   - **Inputs**: `{"title": str, "sample_data": Optional[Dict]}`
+   - **Behavior**: Generates and stores a simulated report in local mock memory.
+   - **Policy**: Consequential action that defaults to awaiting human approval.
+
+*Security Boundary:* Tool registry rejects any unapproved or foreign tool invocations (such as shell commands, email sending, or filesystem deletion) with `ToolExecutionError`.
+
+---
+
+## 6. Workflow Executor & Safety Rules (`agentic_workflow/executor.py`)
+
+### Execution Workflow:
+1. Validates the plan's schema and checks that all requested tools are registered.
+2. Checks dependency order and runs steps sequentially.
+3. **Critical Safety Gate**:
+   - Before executing any step marked as consequential or using a consequential tool, the executor halts.
+   - Transitions state machine to `AWAITING_APPROVAL`.
+   - Generates a tracked `ApprovalRequest` bound to `workflow_id`, `run_id`, and `step_id`.
+   - Tool execution is **strictly blocked** while pending.
+   - Input payloads containing `"status": "approved"` are **never** treated as authorization.
+4. **Single-Use Approvals**:
+   - Approvals can be used only once; once consumed by step execution, they are marked `is_consumed = True` and cannot authorize subsequent executions.
+   - `get_approval_request_for_step` returns the most recent request matching `workflow_id` + `run_id` + `step_id`.
+5. **Approval Resolution**:
+   - If **Approved**: Resumes execution into `running`, executes the tool, consumes the approval, and proceeds.
+   - If **Denied / Rejected**: Transitions state machine to `cancelled`, marks step `cancelled`, and never calls the tool.
+6. Returns a structured `WorkflowResult` with timing, step outputs, and audit records.
+
+---
+
+## 7. REST API Endpoints (`server.py`)
+
+The server binds securely to `127.0.0.1:8000`:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Web dashboard displaying 7-state machine, steps, approval controls, and logs |
+| `GET` | `/api/v1/health` | Health check returning `{"status": "healthy"}` |
+| `GET` | `/api/v1/tools` | Returns specifications for the two registered mock tools |
+| `GET` | `/api/v1/state` | Returns current plan, run ID, state, pending approval, and logs |
+| `POST`| `/api/v1/agent/run` | Triggers or resumes plan execution (requires JSON + `X-Session-Token`) |
+| `POST`| `/api/v1/agent/pause` | Pauses running execution into `PAUSED` state (requires `X-Session-Token`) |
+| `POST`| `/api/v1/agent/reset` | Resets plan to `DRAFT` and clears executor approvals (requires `X-Session-Token`) |
+| `POST`| `/api/v1/agent/failing_scenario` | Loads demonstrably failing plan to showcase `FAILED` state |
+| `POST`| `/api/v1/approvals` | Submits approval decision (`"decision": "approve" \| "reject"`, `"by": str`) |
+
+---
+
+## 8. Setup & Run Instructions
+
+### Prerequisites
+- Python 3.10+ (Tested on Python 3.14)
+
+Install dependencies from `requirements.txt`:
+```powershell
+py -m pip install -r requirements.txt
+```
+
+### Running the Automated Tests
+Run the comprehensive test suite with pytest:
+```powershell
+py -m pytest tests -v
+```
+
+### Running the Terminal Demonstration (Day 7)
+```powershell
+py demo.py
+```
+
+### Running the Local Interactive Web Dashboard
+```powershell
+py server.py
+```
+Open in browser: **http://127.0.0.1:8000**
+
+---
+
+## 9. Example Workflow Execution & Expected Output
+
+### Running `py demo.py`:
+```text
+========================================================================
+  1. TOOL REGISTRY VERIFICATION
+========================================================================
+Registered mock tools count: 2
+  * mock_task_checker        [SAFE - AUTO]             Risk: informational  (Accepts sample task data and returns a simulated task status (harmless, informational).)
+  * mock_report_generator    [CONSEQUENTIAL - GATED]   Risk: sensitive      (Accepts sample data or task-checker output and generates a simulated report (consequential).)
+
+========================================================================
+  2. DEFINING TYPED WORKFLOW PLAN (Multi-Step Vertical Slice)
+========================================================================
+Workflow ID:  plan-demo-001
+Description:  Run task check followed by gated consequential report generation.
+Initial State: DRAFT
+Steps (2 total):
+   - [step-001] Inspect Codebase Audit Task (Tool: mock_task_checker, Consequential: False)
+   - [step-002] Generate Executive Audit Report (Tool: mock_report_generator, Consequential: True)
+
+========================================================================
+  3. PHASE 1: EXECUTE SAFE STEP & TRIGGER HUMAN SAFETY GATE
+========================================================================
+Workflow State:       AWAITING_APPROVAL
+Executed Steps:       ['step-001']
+Step 1 Status:        COMPLETED (Safe - Auto Completed)
+Step 1 Output:        {'status': 'success', 'task_id': 'task-audit-101', 'task_status': 'completed', 'details': {'task_id': 'task-audit-101', 'name': 'Quarterly Codebase Audit', 'status': 'completed', 'items_analyzed': 142, 'anomalies': 0}, 'simulated': True}
+Step 2 Status:        AWAITING_APPROVAL (Consequential - Gated & Not Executed)
+
+Generated Approval Requests: 1
+  * Approval ID: appr-f9d27dd7
+  * Step ID:     step-002 -> Tool: mock_report_generator
+  * Risk Level:  SENSITIVE
+  * Reason:      Action 'Generate Executive Audit Report' using tool 'mock_report_generator' is classified as consequential (sensitive).
+  * Inputs:      {"title": "Quarterly Codebase Audit Report", "sample_data": {"items_analyzed": 142, "status": "approved"}}
+  * Status:      PENDING
+
+========================================================================
+  4. HUMAN-IN-THE-LOOP APPROVAL DECISION
+========================================================================
+Reviewer (Suhani A - SDE 3) approves the consequential action...
+Approval Status:    APPROVED
+Decided By:         Suhani A (SDE 3)
+Decision Details:   Audit data verified. Report generation approved.
+
+========================================================================
+  5. PHASE 2: RESUME WORKFLOW & EXECUTE APPROVED ACTION
+========================================================================
+Final State:    SUCCEEDED
+Executed Steps: ['step-001', 'step-002']
+Step 2 Status:  COMPLETED
+Step 2 Output:  {'status': 'success', 'report_id': 'rep-5f5414ff', 'title': 'Quarterly Codebase Audit Report', 'summary': "Simulated report 'Quarterly Codebase Audit Report' generated successfully.", 'simulated': True}
+Summary:        Workflow completed successfully.
+
+========================================================================
+  6. SAFETY TEST: REJECTED APPROVAL SCENARIO
+========================================================================
+Workflow State: AWAITING_APPROVAL
+Reviewer DENIES approval for request 'appr-45d88b29'...
+Resulting State:   CANCELLED
+Step Status:       CANCELLED
+Was tool executed? False (Verified: Not executed)
+
+========================================================================
+  DEMO COMPLETED SUCCESSFULLY: ALL ACCEPTANCE CRITERIA VERIFIED
+========================================================================
+```
+
+
+---
+
+## 10. Demonstration Guide (Successful, Denied, and Failing Scenarios)
+
+### Scenario A: Successful Workflow with Explicit Approval
+1. Open **http://127.0.0.1:8000** in your browser.
+2. Click **"Run / Resume"**:
+   - Step 1 (`mock_task_checker`) automatically executes and marks `COMPLETED`.
+   - The workflow pauses at `awaiting_approval` (Safety Gate).
+   - The **Human-in-the-Loop Safety Gate Banner** appears explaining why approval is required.
+3. Click **"Approve & Proceed"**:
+   - Step 2 (`mock_report_generator`) is executed.
+   - The workflow moves to `succeeded` (terminal state) with generated report outputs.
+
+### Scenario B: Denied Approval
+1. Click **"Reset Plan"** to restore clean `DRAFT` state.
+2. Click **"Run / Resume"** to trigger the safety gate at Step 2.
+3. Click **"Reject & Halt"**:
+   - The report generator is **never executed**.
+   - The workflow transitions immediately to `cancelled` (terminal state).
+
+### Scenario C: Failing Demonstration Scenario
+1. In the dashboard, click **"Failing Scenario"**:
+   - Loads a test workflow where `mock_task_checker` deliberately receives invalid empty inputs (`{}`).
+2. Click **"Run / Resume"**:
+   - Execution halts cleanly on handled tool error.
+   - A red **Failure Banner** displays the exact diagnostic: `Parameter 'task_id' is required and must be a non-empty string.`
+   - The state node and badge update to `FAILED` (terminal state) without falsely indicating success.
+3. Click **"Reset Plan"** to cleanly clear errors and restore the normal DRAFT workflow.
+
+---
+
+## 11. Verification Summary
+- **70 Automated Pytest Tests Passing** (covering schemas, forbidden extra fields, cyclic dependencies, all 42 state transitions, mock tools, safety gate blocking, denial cancellation, single-use approvals, input spoofing resistance, terminal state lock, pause/resume, failing scenario, and HTTP security).
+- **100% Mock Mode** (purely in-memory simulated objects, zero OS access, zero real network calls).
+- **Interactive Web Interface & REST API** active at `http://127.0.0.1:8000`.
+
+
+---
+
 # AI Voice Co-Pilot - Speech-to-Text Pipeline Foundation (Workstream W2)
 
 [![CI - Test Suite](https://img.shields.io/badge/pytest-81%20passed-brightgreen.svg)]()
@@ -444,10 +805,10 @@ python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors
 
 ---
 
-# Part 5: Workstream W6 � Frontend & UX (Varsha B S)
+# Part 5: Workstream W6 – Frontend & UX (Varsha B S)
 
-> **Developer**: Varsha B S
-> **Workstream**: W6 � Frontend and UX
+> **Developer**: Varsha B S  
+> **Workstream**: W6 – Frontend and UX  
 > **Test Suite**: 41 Automated Component, Contract, and Hook Tests (100% Passing)
 
 ## 1. Overview & Capabilities
@@ -462,12 +823,12 @@ python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors
 
 ## 2. How to Run Frontend Locally
 
-``bash
+```bash
 npm install
 npm run dev
-``
+```
 
 ### Run Frontend Unit & Component Tests
-``bash
+```bash
 npm test
-``
+```
