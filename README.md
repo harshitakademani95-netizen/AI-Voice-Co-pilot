@@ -292,3 +292,102 @@ python demo/live_demo.py --all
 - [x] Provider-neutral adapter and deterministic fake transcriber verified.
 - [x] Ordered accumulator handles chronological ordering, duplicates, and late interims.
 - [x] Day 7 live demo verified on localhost and CLI.
+
+
+---
+
+---
+
+# Workstream W3 — Context & Reasoning (Amruta A J — Version 1)
+
+> The following section documents the W3 Context & Reasoning contribution by **Amruta A J**.
+> It is preserved here alongside the W2 STT contribution to keep all Week 1 workstream
+> implementations on the shared branch `AI-Voice-Co-pilot-Version-1`.
+
+
+# Workstream W3 – Context & Reasoning: Context Schemas, Mock Reasoning & Versioned Prompts
+
+**Team**: SDE 3
+**Developer**: Amruta A J
+**Workstream**: W3 – Context & Reasoning
+**Sprint / Duration**: Week 1 (Day 1 – Day 7 Foundation & First Vertical Slice)
+**Status**: Completed & Validated (54/54 Unit Tests Passing)
+
+---
+
+## W3-1. Overview & Scope
+
+This module establishes the foundational **Context and Reasoning Layer** for the **AI Voice Co-Pilot** system as defined in the Product Requirements Document (PRD) and System Design Document (SDD).
+
+In strict accordance with the assigned scope for **Workstream W3**, this module implements:
+1. **Context Schemas**: Strongly-typed, validated Pydantic models (`ScreenContext`, `ContextItem`, `SourceReference`, `ReasoningRequest`, `ReasoningResult`) with strict schema validation (`extra="forbid"`), length limits, pattern enforcement, and timezone-aware datetimes.
+2. **Synthetic Context Fixtures**: Fictional developer and document workspace fixtures with **screen capture disabled by default** (`capture_enabled=False`, enforced by model validators).
+3. **Deterministic Mock Reasoning**: A predictable, repeatable reasoning engine that produces grounded responses with source citations, risk categorization (Categories A, B, C, D), Human-in-the-Loop safety gates, and structured error handling (`reason_safe`).
+4. **Hardened Versioned Prompts & Security Boundaries**: Immutable prompt templates that strictly separate **trusted system instructions** from **untrusted contextual content**, escaping HTML entities and neutralizing section headers to prevent prompt injection.
+5. **Validation & Unit Testing**: 54 automated test cases covering valid, invalid, and edge-case inputs with 100% passing results.
+
+> **Scope Boundary Note**: This module operates in offline mock mode without paid API keys, without speech-to-text / text-to-speech hardware dependencies, and without live OS screen capturing. Third-party dependencies are strictly limited to `pydantic>=2.0,<3`.
+
+---
+
+## W3-2. Directory Structure (W3 files)
+
+```text
+src/
+  context/
+    schemas.py          # The 5 core schemas with validation & constraints
+    fixtures.py         # Synthetic fixtures (capture disabled by default)
+  prompts/
+    versioned_prompts.py # Prompt registry, versioning & injection defense
+  reasoning/
+    mock_engine.py      # Deterministic mock reasoning & grounding
+tests/
+  test_context_schemas.py  # Tests for 5 schemas and validation constraints (19 tests)
+  test_synthetic.py        # Tests for synthetic context & safety defaults (4 tests)
+  test_mock_reasoning.py   # Tests for deterministic reasoning & safety gates (22 tests)
+  test_prompts.py          # Tests for versioning & untrusted content isolation (9 tests)
+web/
+  index.html / style.css / app.js   # Web dashboard interface
+demo.py          # Interactive demonstration script
+run_tests.py     # Standalone test runner with structured reports
+server.py        # Localhost development server (port 8000)
+requirements.txt # Dependency specification (pydantic>=2.0,<3)
+```
+
+---
+
+## W3-3. Safety Architecture & Intent Routing
+
+- **Category A (Informational)**: Read-only queries. `requires_approval = False`.
+- **Category B (Low-Risk)**: Workspace search. `action_required = True`, `requires_approval = False`.
+- **Category C (Sensitive)**: File manipulation. `action_required = True`, `requires_approval = True`.
+- **Category D (Destructive)**: Deletions. `action_required = True`, `requires_approval = True`.
+
+---
+
+## W3-4. How to Run (W3)
+
+```powershell
+pip install -r requirements.txt
+python run_tests.py            # 54 tests, all passing
+python demo.py                 # Interactive demonstration
+python server.py               # Localhost server at http://localhost:8000
+```
+
+### W3 Test Results
+```text
+SUMMARY: Ran 54 tests in 0.008s
+Passed: 54 | Failures: 0 | Errors: 0
+Status: ALL TESTS PASSED [OK]
+```
+
+---
+
+## W3-5. Field Mapping for W2/W4
+
+| Internal Schema Field | External API Field | Description |
+| :--- | :--- | :--- |
+| `ReasoningRequest.user_query` | `message` | User prompt/query text |
+| `ReasoningResult.response_text` | `response` | Output text produced by reasoning |
+| `ReasoningResult.status == "success"` | `completed` | Task completion indicator |
+| `ReasoningResult.requires_approval` | `requires_approval` | Human-in-the-loop gate required |

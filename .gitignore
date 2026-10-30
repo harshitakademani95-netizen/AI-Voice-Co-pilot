@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 *.so
 .Python
 build/
@@ -27,6 +28,8 @@ MANIFEST
 venv/
 ENV/
 env/
+.env
+.env.*
 .env.local
 
 # Testing and Type Checking
@@ -35,6 +38,7 @@ env/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.pyrefly/
 
 # Audio / Media Recordings (PR requirement: no secrets/recordings/personal data)
 *.wav
@@ -43,11 +47,17 @@ htmlcov/
 *.ogg
 *.flac
 *.webm
+*.png
+*.jpg
+*.mp4
 recordings/
 audio_cache/
+screenshots/
+
+# Logs
+*.log
 
 # Secrets and Configuration
-.env
 *.pem
 *.key
 *.token
@@ -60,4 +70,3 @@ credentials.json
 *.swo
 .DS_Store
 Thumbs.db
-
