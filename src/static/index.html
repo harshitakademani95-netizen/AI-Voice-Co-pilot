@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Copilot — Audio & VAD Visualizer (W1)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(16, 24, 40, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --accent: #818cf8;
+      --success: #34d399;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(129, 140, 248, 0.12) 0px, transparent 50%);
+      color: var(--text);
+      font-family: 'Outfit', -apple-system, sans-serif;
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    h1 { font-size: 28px; font-weight: 700; background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    canvas {
+      width: 100%;
+      height: 120px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      display: block;
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 10px;
+      border: none;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    .btn-primary { background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #fff; box-shadow: 0 4px 14px var(--primary-glow); }
+    .btn-primary:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.15); }
+    .btn-secondary { background: rgba(255, 255, 255, 0.08); color: var(--text); border: 1px solid var(--card-border); }
+    .btn-secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+    .btn-success { background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #fff; box-shadow: 0 4px 14px rgba(5, 150, 105, 0.25); }
+    .btn-success:hover:not(:disabled) { filter: brightness(1.15); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+    .stat-box { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 12px; text-align: center; }
+    .stat-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+    .stat-value { font-size: 18px; font-weight: 700; color: var(--primary); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'JetBrains Mono', monospace; }
+    th { text-align: left; padding: 10px 12px; color: var(--text-muted); border-bottom: 1px solid var(--card-border); font-weight: 500; }
+    td { padding: 9px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+    tr:hover { background: rgba(255, 255, 255, 0.02); }
+    .table-container { max-height: 280px; overflow-y: auto; margin-top: 10px; }
+    .test-log { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.4); padding: 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); max-height: 180px; overflow-y: auto; white-space: pre-wrap; color: #cbd5e1; }
+    .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { opacity: 0.4; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.2); } 100% { opacity: 0.4; transform: scale(0.9); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <span class="badge">WEEK 1 FOUNDATION & FIRST VERTICAL SLICE</span>
+        <h1>AI Voice Copilot — Audio & VAD Visualizer</h1>
+        <div class="subtitle">Team: SDE 3 | Student: Harshita G Kademani | Workstream: W1 (Audio & VAD)</div>
+      </div>
+      <div>
+        <button id="runTestsBtn" class="btn btn-success" type="button">Run 30 Unit Tests</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Live Waveform & Stream Controller -->
+      <div class="card">
+        <div class="card-title">
+          <span class="pulse-dot"></span> Real-Time Audio Waveform (Synthetic Mock Source)
+        </div>
+        <canvas id="waveformCanvas" width="600" height="120"></canvas>
+
+        <div class="controls">
+          <button id="startBtn" class="btn btn-primary" type="button">Start Stream</button>
+          <button id="stopBtn" class="btn btn-secondary" type="button" disabled>Stop Stream</button>
+          <button id="clearBtn" class="btn btn-secondary" type="button">Clear</button>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-box">
+            <div class="stat-label">Sequence ID</div>
+            <div class="stat-value" id="statSeq">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Timestamp</div>
+            <div class="stat-value" id="statTime">0.00s</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Chunk Size</div>
+            <div class="stat-value" id="statSize">640 B</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Format</div>
+            <div class="stat-value" id="statFormat">16kHz/1ch</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unit Test Runner & Verification -->
+      <div class="card">
+        <div class="card-title">Automated Verification Suite (30 Tests)</div>
+        <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
+          <div id="testBadge" class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">
+            Status: <span id="testStatus">Ready to Run</span>
+          </div>
+          <div class="badge" style="background: rgba(255, 255, 255, 0.05); color: #94a3b8; border-color: rgba(255, 255, 255, 0.1);">
+            <span id="testSummary">30 Total Tests</span>
+          </div>
+        </div>
+        <div class="test-log" id="testLog">Click "Run 30 Unit Tests" above to execute tests for:
+* AudioChunk, AudioFormat, AudioError schemas
+* Invalid sample rates and channels validation
+* Empty chunk rejection (EMPTY_CHUNK_DATA)
+* Corrupt unaligned chunk rejection (CORRUPT_CHUNK_DATA)
+* MockMicrophone determinism and stream reset</div>
+      </div>
+    </div>
+
+    <!-- Live Audio Chunks Stream Table -->
+    <div class="card">
+      <div class="card-title">Real-Time AudioChunks Stream Table</div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Seq ID</th>
+              <th>Timestamp</th>
+              <th>Chunk Size</th>
+              <th>Sample Rate</th>
+              <th>Channels</th>
+              <th>Duration</th>
+              <th>Encoding</th>
+            </tr>
+          </thead>
+          <tbody id="chunkTableBody">
+            <tr id="emptyTableRow">
+              <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                Stream is idle. Click "Start Stream" above to stream AudioChunks in real time.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      let evtSource = null;
+      let wavePoints = new Array(80).fill(0);
+      const canvas = document.getElementById('waveformCanvas');
+      const ctx = canvas ? canvas.getContext('2d') : null;
+
+      function drawWave(samples) {
+        if (!ctx || !canvas) return;
+        if (samples && samples.length > 0) {
+          wavePoints = wavePoints.slice(samples.length).concat(samples);
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
+
+        const sliceWidth = canvas.width / wavePoints.length;
+        let x = 0;
+        for (let i = 0; i < wavePoints.length; i++) {
+          const y = (canvas.height / 2) + (wavePoints[i] * (canvas.height / 2.4));
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.stroke();
+      }
+
+      function startStream() {
+        if (evtSource) {
+          evtSource.close();
+          evtSource = null;
+        }
+
+        const tbody = document.getElementById('chunkTableBody');
+        if (tbody) tbody.innerHTML = '';
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = false;
+
+        evtSource = new EventSource('/api/v1/stream?duration=10.0&realtime=true');
+
+        evtSource.onmessage = function(e) {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.done) {
+              stopStream();
+              return;
+            }
+
+            const statSeq = document.getElementById('statSeq');
+            const statTime = document.getElementById('statTime');
+            const statSize = document.getElementById('statSize');
+            const statFormat = document.getElementById('statFormat');
+
+            if (statSeq) statSeq.textContent = data.sequence_id;
+            if (statTime) statTime.textContent = Number(data.timestamp).toFixed(2) + 's';
+            if (statSize) statSize.textContent = data.size_bytes + ' B';
+            if (statFormat) statFormat.textContent = data.sample_rate + 'Hz/' + data.channels + 'ch';
+
+            drawWave(data.samples);
+
+            if (tbody) {
+              const row = document.createElement('tr');
+              const chText = data.channels === 1 ? '1 (Mono)' : '2 (Stereo)';
+              row.innerHTML = '<td><strong>#' + data.sequence_id + '</strong></td>' +
+                '<td>' + Number(data.timestamp).toFixed(3) + 's</td>' +
+                '<td>' + data.size_bytes + ' Bytes</td>' +
+                '<td>' + data.sample_rate + ' Hz</td>' +
+                '<td>' + chText + '</td>' +
+                '<td>' + data.duration_ms + ' ms</td>' +
+                '<td>' + data.encoding + '</td>';
+              tbody.prepend(row);
+            }
+          } catch (err) {
+            console.error('Error parsing stream event:', err);
+          }
+        };
+
+        evtSource.onerror = function() {
+          stopStream();
+        };
+      }
+
+      function stopStream() {
+        if (evtSource) {
+          evtSource.close();
+          evtSource = null;
+        }
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (startBtn) startBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
+      }
+
+      function clearTable() {
+        stopStream();
+        const tbody = document.getElementById('chunkTableBody');
+        if (tbody) {
+          tbody.innerHTML = '<tr id="emptyTableRow"><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">Cleared. Click "Start Stream" to resume.</td></tr>';
+        }
+        const statSeq = document.getElementById('statSeq');
+        const statTime = document.getElementById('statTime');
+        if (statSeq) statSeq.textContent = '0';
+        if (statTime) statTime.textContent = '0.00s';
+        wavePoints = new Array(80).fill(0);
+        drawWave([]);
+      }
+
+      async function runTests() {
+        const log = document.getElementById('testLog');
+        const status = document.getElementById('testStatus');
+        const badge = document.getElementById('testBadge');
+        const summary = document.getElementById('testSummary');
+        const runBtn = document.getElementById('runTestsBtn');
+
+        if (runBtn) runBtn.disabled = true;
+        if (status) status.textContent = 'Running 30 tests...';
+        if (log) log.textContent = 'Executing python -m unittest discover tests -v ...\n';
+
+        try {
+          const resp = await fetch('/api/v1/tests/run', { method: 'POST' });
+          const res = await resp.json();
+          const passed = res.tests_run - (res.failures + res.errors);
+
+          if (status) {
+            status.textContent = res.success
+              ? passed + '/' + res.tests_run + ' PASSED (OK)'
+              : (res.failures + res.errors) + ' FAILED (' + passed + '/' + res.tests_run + ' passed)';
+          }
+
+          if (summary) {
+            summary.textContent = res.tests_run + ' Total | ' + passed + ' Passed | ' + res.failures + ' Failed | ' + res.errors + ' Errors';
+          }
+
+          if (badge) {
+            badge.style.background = res.success ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+            badge.style.color = res.success ? '#34d399' : '#f87171';
+            badge.style.borderColor = res.success ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+          }
+
+          if (log) {
+            log.textContent = res.output;
+          }
+        } catch (err) {
+          if (status) status.textContent = 'Execution Error';
+          if (log) log.textContent = 'Error executing tests: ' + (err && err.message ? err.message : err);
+        } finally {
+          if (runBtn) runBtn.disabled = false;
+        }
+      }
+
+      function init() {
+        drawWave([]);
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const runBtn = document.getElementById('runTestsBtn');
+
+        if (startBtn) startBtn.addEventListener('click', startStream);
+        if (stopBtn) stopBtn.addEventListener('click', stopStream);
+        if (clearBtn) clearBtn.addEventListener('click', clearTable);
+        if (runBtn) runBtn.addEventListener('click', runTests);
+
+        // Automatically load and display actual test results on startup
+        runTests();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    })();
+  </script>
+</body>
+</html>
