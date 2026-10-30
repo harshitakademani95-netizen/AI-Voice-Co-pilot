@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+.venv/
+venv/
+.pytest_cache/
+.pyrefly/
+*.png
+*.jpg
+*.mp4
+*.wav
+screenshots/
+recordings/
