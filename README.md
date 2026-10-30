@@ -56,68 +56,137 @@ AI Voice Bot/
 
 | Schema | Field | Type | Units | Constraints / Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
+| **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `11025`, `12000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
 | | `channels` | `int` | Count | Must be `1` (mono) or `2` (stereo). Default `1`. |
 | | `sample_width`| `int` | Bytes/Sample | Must be `1`, `2`, or `4`. Default `2` (16-bit PCM). |
-| | `encoding` | `str` | Codec ID | Non-empty string. Default `"pcm_s16le"`. |
+| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`). |
 | **`AudioChunk`** | `sequence_id` | `int` | Counter | Strictly non-negative integer (`>= 0`), monotonically increasing. |
-| | `timestamp` | `float` | Seconds | Strictly non-negative (`>= 0.0`), advancing by chunk duration. |
-| | `data` | `bytes` | Raw PCM | Non-empty binary bytes; byte length must be exact multiple of `format.frame_size`. |
+| | `timestamp` | `float` | Seconds | Strictly non-negative, finite (`>= 0.0`, rejects NaN/inf), advancing by chunk duration. |
+| | `data` | `bytes` | Raw PCM | Non-empty binary bytes (bytearray input is defensively copied); byte length must be exact multiple of `format.frame_size`. |
 | | `format` | `AudioFormat` | Contract | Valid `AudioFormat` instance. |
 | | `metadata` | `dict` | Key/Value | Optional contextual metadata. |
 | **`AudioError`** | `message` | `str` | Text | Human-readable explanation of error. |
-| | `code` | `str` | Code | Standardized machine-readable error code (`INVALID_SAMPLE_RATE`, `EMPTY_CHUNK_DATA`, `CORRUPT_CHUNK_DATA`, etc.). |
+| | `code` | `str` | Code | Standardized machine-readable error code (`INVALID_SAMPLE_RATE`, `EMPTY_CHUNK_DATA`, `CORRUPT_CHUNK_DATA`, `INVALID_ENCODING`, etc.). |
+| | `request_id` | `str` | Tracking ID | Optional correlation tracking ID per Doc 04 section 5. |
 | | `details` | `dict` | Key/Value | Contextual debugging dictionary. |
 
 ---
 
-## 4. How to Run the CLI Demo
+## 4. Installation & Setup
 
-Run the CLI demo with a single command from the project root:
+> **Note on Zero-Dependency Execution:** The core audio pipeline, schemas, mock microphone, CLI demo, and entire unit test suite run using **Python standard library only** (no external packages or `pip install` required). Installing `requirements.txt` is **only required for the optional FastAPI web visualizer dashboard** (`src/server.py`).
+
+Set up the project using a Python virtual environment:
+
+1. **Create a virtual environment:**
+   ```powershell
+   python -m venv venv
+   ```
+
+2. **Activate the virtual environment:**
+   - **Windows (PowerShell):**
+     ```powershell
+     .\venv\Scripts\Activate.ps1
+     ```
+   - **Windows (CMD):**
+     ```cmd
+     venv\Scripts\activate.bat
+     ```
+   - **Linux / macOS:**
+     ```bash
+     source venv/bin/activate
+     ```
+
+3. **Install optional web visualizer dependencies (FastAPI & Uvicorn):**
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+4. **Quick execution summary:**
+   - **Run CLI Demo (Zero-install):** `python -m src.cli --short`
+   - **Run Unit Tests (Zero-install):** `python -m unittest discover tests -v`
+   - **Run Web Dashboard (Requires requirements.txt):** `python -m src.server` (visit `http://localhost:8000`)
+
+---
+
+## 5. How to Run the CLI Demo
+
+*(Note: The CLI demo uses a synthetic mock audio source for testing and local simulation. No physical microphone hardware is needed or captured.)*
+
+Run the CLI demo with a single command from your terminal:
 
 ```powershell
 python -m src.cli
 ```
 
-### Options:
+### Command Options:
 
-```
+```text
+--short              Run a quick short demo (5 chunks / 100 ms)
+--realtime           Simulate real-time streaming pacing
 --duration FLOAT     Total stream duration in seconds (default: 1.0)
---chunk-ms FLOAT     Chunk duration in milliseconds (default: 20.0)
+--chunk-ms FLOAT     Chunk duration in milliseconds (default: 20.0 ms)
 --sample-rate INT    Audio sample rate in Hz (default: 16000)
 --channels INT       Number of channels: 1 (mono) or 2 (stereo) (default: 1)
 --frequency FLOAT    Synthetic tone frequency in Hz (default: 440.0)
---realtime           Simulate real-time hardware mic pacing
 ```
 
-### Example Runs:
+### Simple Example Commands:
 
 ```powershell
-# 1. Quick 100ms stream verification (5 chunks of 20ms)
-python -m src.cli --duration 0.1 --chunk-ms 20
+# 1. Quick short demo (fast 5 chunks / 100ms)
+python -m src.cli --short
 
-# 2. High fidelity 48kHz stereo stream
-python -m src.cli --duration 0.2 --sample-rate 48000 --channels 2 --chunk-ms 20
-
-# 3. Real-time microphone pacing simulation
+# 2. Real-time simulation mode (simulates live streaming pacing)
 python -m src.cli --duration 0.5 --realtime
+
+# 3. Custom sample rate and stereo channels (e.g. 48kHz stereo)
+python -m src.cli --duration 0.2 --sample-rate 48000 --channels 2
 ```
 
 ---
 
-## 5. How to Run the Unit Tests
+## 6. How to Run the Unit Tests
 
-Execute the comprehensive test suite with Python's built-in test runner:
+Execute the comprehensive test suite with Python's built-in test runner (no third-party dependencies required):
 
 ```powershell
 python -m unittest discover tests -v
 ```
 
-All 30 unit tests pass, validating:
+All 39 unit tests pass, validating:
 1. Valid schema creation and metrics calculations.
 2. Rejection of invalid sample rates (negative, zero, non-integer, unsupported rates).
 3. Rejection of invalid channel counts (zero, negative, 3+ channels).
-4. Rejection of invalid chunk sequence IDs and timestamps.
+4. Rejection of invalid chunk sequence IDs and timestamps (including finite checking for NaN / infinity).
 5. Rejection of empty chunk data (`b""` -> `EMPTY_CHUNK_DATA`).
 6. Rejection of corrupt / unaligned byte lengths (`CORRUPT_CHUNK_DATA`).
 7. Determinism: identical outputs across multiple chunker and mock source runs.
+8. Support for 1, 2, and 4-byte sample widths in `MockMicrophone` with accurate byte counts and zero drift.
+9. Stream overshoot protection preventing sample rounding drift at non-standard rates (e.g. 22050 Hz).
+10. Defensive copy of mutable `bytearray` inputs to preserve `AudioChunk` immutability.
+11. Robust error wrapping in `from_dict()` for missing keys, corrupt base64, and non-dict payloads.
+12. Encoding compatibility validation against sample widths (rejecting invalid names like `"banana"`).
+13. API error dictionary serialization with `request_id` per Doc 04, section 5.
+
+---
+
+## 7. How to Run the Interactive Web Visualizer Dashboard
+
+Start the local visualizer dashboard server:
+
+```powershell
+python -m src.server
+```
+
+Then open your browser and navigate to:
+```
+http://localhost:8000
+```
+
+Features included in the dashboard:
+- **Real-Time Audio Waveform:** HTML5 Canvas visualizer rendering live PCM chunks.
+- **Start / Stop Stream & Clear:** Real-time Server-Sent Events (SSE) streaming with live metric meters.
+- **AudioChunks Table:** Real-time log of received chunks showing sequence IDs, timestamps, byte sizes, and formats.
+- **Dynamic Unit Test Runner:** Runs the 30-test suite on demand and displays actual test execution results.
+

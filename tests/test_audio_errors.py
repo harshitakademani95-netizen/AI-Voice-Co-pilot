@@ -141,6 +141,97 @@ class TestAudioErrors(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "INVALID_SAMPLE_RATE")
         self.assertEqual(payload["error"]["message"], "Invalid sample rate provided")
         self.assertEqual(payload["error"]["details"]["sample_rate"], 99999)
+        self.assertIn("request_id", payload["error"])
+        self.assertIsNone(payload["error"]["request_id"])
+
+    def test_audio_error_with_request_id(self):
+        """AudioError supports request_id in initialization and to_dict per Doc 04 section 5."""
+        err = AudioError(
+            message="Validation failed",
+            code="VALIDATION_FAILED",
+            details={"field": "channels"},
+            request_id="req-test-uuid-999",
+        )
+        self.assertEqual(err.request_id, "req-test-uuid-999")
+        self.assertIn("req-test-uuid-999", str(err))
+
+        payload = err.to_dict()
+        self.assertEqual(payload["error"]["request_id"], "req-test-uuid-999")
+
+        # Can also pass or override request_id in to_dict()
+        override_payload = err.to_dict(request_id="req-override-123")
+        self.assertEqual(override_payload["error"]["request_id"], "req-override-123")
+
+    def test_invalid_chunk_timestamp_nan_and_infinity(self):
+        """NaN, +inf, and -inf timestamps must be rejected with AudioError."""
+        valid_data = b"\x00\x00" * 10
+        for invalid_ts in [float("nan"), float("inf"), float("-inf")]:
+            with self.assertRaises(AudioError) as ctx:
+                AudioChunk(sequence_id=0, timestamp=invalid_ts, data=valid_data)
+            self.assertEqual(ctx.exception.code, "INVALID_TIMESTAMP")
+            self.assertIn("finite", ctx.exception.message)
+
+    def test_invalid_encoding_names(self):
+        """Arbitrary / unsupported encoding names like 'banana' must raise AudioError."""
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat(sample_rate=16000, channels=1, sample_width=2, encoding="banana")
+        self.assertEqual(ctx.exception.code, "INVALID_ENCODING")
+        self.assertIn("Unsupported audio encoding", ctx.exception.message)
+
+    def test_encoding_incompatible_with_sample_width(self):
+        """Encoding must be compatible with sample_width (e.g. 16-bit encoding with 4-byte width fails)."""
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat(sample_rate=16000, channels=1, sample_width=4, encoding="pcm_s16le")
+        self.assertEqual(ctx.exception.code, "INVALID_ENCODING")
+        self.assertIn("incompatible with sample_width", ctx.exception.message)
+
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat(sample_rate=16000, channels=1, sample_width=1, encoding="pcm_s32le")
+        self.assertEqual(ctx.exception.code, "INVALID_ENCODING")
+        self.assertIn("incompatible with sample_width", ctx.exception.message)
+
+    def test_chunk_bytearray_defensive_copy(self):
+        """AudioChunk must defensively copy bytearray data to maintain immutability."""
+        buf = bytearray(b"\x01\x02\x03\x04")
+        chunk = AudioChunk(sequence_id=0, timestamp=0.0, data=buf)
+        self.assertIsInstance(chunk.data, bytes)
+        self.assertEqual(chunk.data, b"\x01\x02\x03\x04")
+
+        # Mutate the source bytearray
+        buf[0] = 0xAA
+        buf[1] = 0xBB
+
+        # chunk.data must remain unchanged!
+        self.assertEqual(chunk.data, b"\x01\x02\x03\x04")
+
+    def test_chunk_from_dict_error_handling(self):
+        """AudioChunk.from_dict wraps missing keys, non-dict payloads, and bad base64 in AudioError."""
+        # Non-dict payload
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict("not-a-dict")  # type: ignore
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+
+        # Missing sequence_id
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({"timestamp": 0.0, "data_b64": "AAAA"})
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+        self.assertIn("sequence_id", ctx.exception.message)
+
+        # Missing timestamp
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({"sequence_id": 0, "data_b64": "AAAA"})
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+        self.assertIn("timestamp", ctx.exception.message)
+
+        # Invalid base64 in data_b64
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({
+                "sequence_id": 0,
+                "timestamp": 0.0,
+                "data_b64": "!!not_valid_base64!!!",
+            })
+        self.assertEqual(ctx.exception.code, "CORRUPT_CHUNK_DATA")
+        self.assertIn("invalid base64", ctx.exception.message)
 
 
 if __name__ == "__main__":

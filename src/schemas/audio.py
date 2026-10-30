@@ -14,7 +14,9 @@ and downstream pipelines.
 from __future__ import annotations
 
 import base64
+import binascii
 from dataclasses import dataclass, field
+import math
 from typing import Any, Dict, FrozenSet, Optional
 
 
@@ -38,16 +40,31 @@ SUPPORTED_CHANNELS: FrozenSet[int] = frozenset({1, 2})
 # Supported sample widths in bytes: 1 (8-bit), 2 (16-bit PCM), 4 (32-bit float/int)
 SUPPORTED_SAMPLE_WIDTHS: FrozenSet[int] = frozenset({1, 2, 4})
 
+# Supported audio encodings mapped by sample width in bytes
+SUPPORTED_ENCODINGS_BY_WIDTH: Dict[int, FrozenSet[str]] = {
+    1: frozenset({"pcm_u8", "pcm_s8"}),
+    2: frozenset({"pcm_s16le", "pcm_s16be"}),
+    4: frozenset({"pcm_s32le", "pcm_s32be", "pcm_f32le", "pcm_f32be"}),
+}
+ALL_SUPPORTED_ENCODINGS: FrozenSet[str] = frozenset().union(*SUPPORTED_ENCODINGS_BY_WIDTH.values())
+
+DEFAULT_ENCODING_BY_WIDTH: Dict[int, str] = {
+    1: "pcm_u8",
+    2: "pcm_s16le",
+    4: "pcm_s32le",
+}
+
 
 class AudioError(Exception):
     """
     Standard exception raised for any audio validation, schema, or processing failure.
 
-    Conforms to the system design error specification:
+    Conforms to the system design error specification (Doc 04, section 5):
     {
         "error": {
             "code": "<ERROR_CODE>",
             "message": "<Human-readable explanation>",
+            "request_id": "<Optional tracking UUID>",
             "details": {...}
         }
     }
@@ -56,6 +73,7 @@ class AudioError(Exception):
         message (str): Human-readable error description explaining the cause of failure.
         code (str): Machine-readable error code (e.g., 'INVALID_SAMPLE_RATE', 'CORRUPT_CHUNK_DATA').
         details (Optional[Dict[str, Any]]): Contextual key-value pairs providing debug info.
+        request_id (Optional[str]): Optional client/server request correlation ID.
     """
 
     def __init__(
@@ -63,29 +81,44 @@ class AudioError(Exception):
         message: str,
         code: str = "AUDIO_ERROR",
         details: Optional[Dict[str, Any]] = None,
+        request_id: Optional[str] = None,
     ) -> None:
         super().__init__(message)
         self.message: str = message
         self.code: str = code
         self.details: Dict[str, Any] = details or {}
+        self.request_id: Optional[str] = request_id
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize exception to standard API error dictionary format."""
+    def to_dict(self, request_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Serialize exception to standard API error dictionary format.
+        Includes request_id (optional), code, message, and details per Doc 04, section 5.
+        """
+        effective_req_id = request_id if request_id is not None else self.request_id
         return {
             "error": {
                 "code": self.code,
                 "message": self.message,
+                "request_id": effective_req_id,
                 "details": self.details,
             }
         }
 
     def __str__(self) -> str:
+        parts = [f"[{self.code}] {self.message}"]
+        if self.request_id:
+            parts.append(f"request_id: {self.request_id}")
         if self.details:
-            return f"[{self.code}] {self.message} (details: {self.details})"
-        return f"[{self.code}] {self.message}"
+            parts.append(f"details: {self.details}")
+        if len(parts) > 1:
+            return f"{parts[0]} ({', '.join(parts[1:])})"
+        return parts[0]
 
     def __repr__(self) -> str:
-        return f"AudioError(code={self.code!r}, message={self.message!r}, details={self.details!r})"
+        return (
+            f"AudioError(code={self.code!r}, message={self.message!r}, "
+            f"details={self.details!r}, request_id={self.request_id!r})"
+        )
 
 
 @dataclass(frozen=True)
@@ -120,10 +153,18 @@ class AudioFormat:
     sample_rate: int = 16000
     channels: int = 1
     sample_width: int = 2
-    encoding: str = "pcm_s16le"
+    encoding: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Validate sample-rate, channels, and sample-width constraints upon instantiation."""
+        # 0. Default encoding based on sample width if not explicitly provided
+        if self.encoding is None:
+            object.__setattr__(
+                self,
+                "encoding",
+                DEFAULT_ENCODING_BY_WIDTH.get(self.sample_width, "pcm_s16le"),
+            )
+
         # 1. Validate sample_rate
         if not isinstance(self.sample_rate, int) or isinstance(self.sample_rate, bool):
             raise AudioError(
@@ -182,12 +223,35 @@ class AudioFormat:
                 details={"sample_width": self.sample_width, "supported": list(SUPPORTED_SAMPLE_WIDTHS)},
             )
 
-        # 4. Validate encoding
+        # 4. Validate encoding and match against sample_width
         if not isinstance(self.encoding, str) or not self.encoding.strip():
             raise AudioError(
                 message="Encoding must be a non-empty string identifier.",
                 code="INVALID_ENCODING",
                 details={"encoding": self.encoding},
+            )
+        if self.encoding not in ALL_SUPPORTED_ENCODINGS:
+            raise AudioError(
+                message=(
+                    f"Unsupported audio encoding: {self.encoding!r}. "
+                    f"Supported encodings are: {sorted(list(ALL_SUPPORTED_ENCODINGS))}."
+                ),
+                code="INVALID_ENCODING",
+                details={"encoding": self.encoding, "supported": sorted(list(ALL_SUPPORTED_ENCODINGS))},
+            )
+        valid_for_width = SUPPORTED_ENCODINGS_BY_WIDTH.get(self.sample_width, frozenset())
+        if self.encoding not in valid_for_width:
+            raise AudioError(
+                message=(
+                    f"Encoding {self.encoding!r} is incompatible with sample_width={self.sample_width} byte(s). "
+                    f"Supported encodings for width {self.sample_width} are: {sorted(list(valid_for_width))}."
+                ),
+                code="INVALID_ENCODING",
+                details={
+                    "encoding": self.encoding,
+                    "sample_width": self.sample_width,
+                    "supported_for_width": sorted(list(valid_for_width)),
+                },
             )
 
     @property
@@ -220,11 +284,17 @@ class AudioFormat:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AudioFormat:
         """Construct an AudioFormat instance from a dictionary."""
+        if not isinstance(data, dict):
+            raise AudioError(
+                message=f"Format payload must be a dictionary (received: {type(data).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"data_type": type(data).__name__},
+            )
         return cls(
             sample_rate=data.get("sample_rate", 16000),
             channels=data.get("channels", 1),
             sample_width=data.get("sample_width", 2),
-            encoding=data.get("encoding", "pcm_s16le"),
+            encoding=data.get("encoding"),
         )
 
 
@@ -241,12 +311,13 @@ class AudioChunk:
         timestamp:
             - Type: float
             - Units: Seconds (relative offset from stream start or POSIX timestamp)
-            - Constraints: Must be non-negative float or int (>= 0.0).
+            - Constraints: Must be non-negative, finite float or int (>= 0.0).
         data:
             - Type: bytes
             - Units: Raw binary PCM bytes
             - Constraints: Must be non-empty bytes. Length must be an exact integer
                            multiple of format.frame_size (channels * sample_width).
+                           Mutable bytearray inputs are copied to immutable bytes upon init.
         format:
             - Type: AudioFormat
             - Constraints: Must be a valid AudioFormat instance.
@@ -264,6 +335,12 @@ class AudioChunk:
 
     def __post_init__(self) -> None:
         """Validate sequence ID, timestamp, and byte payload integrity."""
+        # 0. Defensive copies: convert mutable bytearray to immutable bytes and shallow copy metadata
+        if isinstance(self.data, (bytes, bytearray)):
+            object.__setattr__(self, "data", bytes(self.data))
+        if isinstance(self.metadata, dict):
+            object.__setattr__(self, "metadata", dict(self.metadata))
+
         # 1. Validate format
         if not isinstance(self.format, AudioFormat):
             raise AudioError(
@@ -286,10 +363,16 @@ class AudioChunk:
                 details={"sequence_id": self.sequence_id},
             )
 
-        # 3. Validate timestamp
+        # 3. Validate timestamp (must be numeric, finite, non-negative)
         if not isinstance(self.timestamp, (int, float)) or isinstance(self.timestamp, bool):
             raise AudioError(
                 message=f"Timestamp must be a float or integer (received: {type(self.timestamp).__name__}).",
+                code="INVALID_TIMESTAMP",
+                details={"timestamp": self.timestamp},
+            )
+        if not math.isfinite(self.timestamp):
+            raise AudioError(
+                message=f"Timestamp must be a finite number (received: {self.timestamp}).",
                 code="INVALID_TIMESTAMP",
                 details={"timestamp": self.timestamp},
             )
@@ -301,7 +384,7 @@ class AudioChunk:
             )
 
         # 4. Validate data type
-        if not isinstance(self.data, (bytes, bytearray)):
+        if not isinstance(self.data, bytes):
             raise AudioError(
                 message=f"Chunk data must be bytes or bytearray (received: {type(self.data).__name__}).",
                 code="INVALID_CHUNK_DATA",
@@ -375,19 +458,88 @@ class AudioChunk:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> AudioChunk:
-        """Construct an AudioChunk instance from a serialized dictionary."""
-        format_obj = AudioFormat.from_dict(payload.get("format", {}))
+        """
+        Construct an AudioChunk instance from a serialized dictionary.
+        Wraps missing keys, bad base64, and non-dict payloads into AudioError.
+        """
+        if not isinstance(payload, dict):
+            raise AudioError(
+                message=f"Chunk payload must be a dictionary (received: {type(payload).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"payload_type": type(payload).__name__},
+            )
+
+        if "sequence_id" not in payload:
+            raise AudioError(
+                message="Missing required field 'sequence_id' in chunk dictionary payload.",
+                code="INVALID_PAYLOAD",
+                details={"missing_key": "sequence_id"},
+            )
+
+        if "timestamp" not in payload:
+            raise AudioError(
+                message="Missing required field 'timestamp' in chunk dictionary payload.",
+                code="INVALID_PAYLOAD",
+                details={"missing_key": "timestamp"},
+            )
+
+        raw_format = payload.get("format", {})
+        if isinstance(raw_format, AudioFormat):
+            format_obj = raw_format
+        elif isinstance(raw_format, dict):
+            format_obj = AudioFormat.from_dict(raw_format)
+        else:
+            raise AudioError(
+                message=f"Invalid format specification in dictionary (received: {type(raw_format).__name__}).",
+                code="INVALID_FORMAT",
+                details={"format": raw_format},
+            )
+
         data_b64 = payload.get("data_b64")
         if data_b64 is not None:
-            data_bytes = base64.b64decode(data_b64)
+            if not isinstance(data_b64, (str, bytes)):
+                raise AudioError(
+                    message=f"Field 'data_b64' must be a string (received: {type(data_b64).__name__}).",
+                    code="CORRUPT_CHUNK_DATA",
+                    details={"data_b64_type": type(data_b64).__name__},
+                )
+            try:
+                data_bytes = base64.b64decode(data_b64, validate=True)
+            except (binascii.Error, ValueError) as b64_err:
+                raise AudioError(
+                    message=f"Corrupt audio chunk: invalid base64 data ({b64_err}).",
+                    code="CORRUPT_CHUNK_DATA",
+                    details={"data_b64": str(data_b64)[:50], "error": str(b64_err)},
+                ) from b64_err
+        elif "data" in payload:
+            raw_data = payload["data"]
+            if isinstance(raw_data, (bytes, bytearray)):
+                data_bytes = bytes(raw_data)
+            else:
+                raise AudioError(
+                    message=f"Field 'data' must be bytes or bytearray (received: {type(raw_data).__name__}).",
+                    code="INVALID_CHUNK_DATA",
+                    details={"data_type": type(raw_data).__name__},
+                )
         else:
-            raw_data = payload.get("data", b"")
-            data_bytes = raw_data if isinstance(raw_data, bytes) else bytes(raw_data)
+            raise AudioError(
+                message="Missing audio data in dictionary payload: either 'data_b64' or 'data' required.",
+                code="EMPTY_CHUNK_DATA",
+                details={"keys": list(payload.keys())},
+            )
+
+        raw_meta = payload.get("metadata", {})
+        if not isinstance(raw_meta, dict):
+            raise AudioError(
+                message=f"Metadata must be a dictionary (received: {type(raw_meta).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"metadata_type": type(raw_meta).__name__},
+            )
 
         return cls(
             sequence_id=payload["sequence_id"],
-            timestamp=float(payload["timestamp"]),
+            timestamp=payload["timestamp"],
             data=data_bytes,
             format=format_obj,
-            metadata=payload.get("metadata", {}),
+            metadata=raw_meta,
         )

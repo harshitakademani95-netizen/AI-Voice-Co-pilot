@@ -18,14 +18,18 @@ from src.schemas.audio import AudioChunk, AudioError, AudioFormat
 
 class MockMicrophone:
     """
-    Simulated microphone input source emitting continuous AudioChunk streams.
+    Simulated mock microphone input source emitting continuous AudioChunk streams.
+
+    Note:
+        This is a purely synthetic audio source designed for pipeline development,
+        testing, and simulation. It does NOT record from a physical microphone device.
 
     Features:
-    - Purely deterministic audio generation (sine wave synthesis or custom pattern).
-    - Monotonically increasing sequence IDs (0, 1, 2, ...) and strictly advancing timestamps.
-    - Configurable sample rate, channels, chunk duration, and waveform frequency.
-    - Supports both offline instant generation (fast unit testing) and real-time pacing
-      (interactive CLI demo).
+        - Purely deterministic audio generation (sine wave synthesis or custom pattern).
+        - Monotonically increasing sequence IDs (0, 1, 2, ...) and strictly advancing timestamps.
+        - Configurable sample rate, channels, chunk duration, and waveform frequency.
+        - Supports both offline instant generation (fast unit testing) and real-time pacing
+          (interactive CLI demo).
     """
 
     def __init__(
@@ -51,7 +55,7 @@ class MockMicrophone:
         """
         self.format: AudioFormat = audio_format if audio_format is not None else AudioFormat()
 
-        if not isinstance(chunk_duration_ms, (int, float)) or chunk_duration_ms <= 0:
+        if not isinstance(chunk_duration_ms, (int, float)) or isinstance(chunk_duration_ms, bool) or not math.isfinite(chunk_duration_ms) or chunk_duration_ms <= 0:
             raise AudioError(
                 message=f"chunk_duration_ms must be positive (received: {chunk_duration_ms}).",
                 code="INVALID_CHUNK_DURATION",
@@ -59,7 +63,7 @@ class MockMicrophone:
             )
         self.chunk_duration_ms: float = float(chunk_duration_ms)
 
-        if not isinstance(frequency_hz, (int, float)) or frequency_hz <= 0:
+        if not isinstance(frequency_hz, (int, float)) or isinstance(frequency_hz, bool) or not math.isfinite(frequency_hz) or frequency_hz <= 0:
             raise AudioError(
                 message=f"frequency_hz must be positive (received: {frequency_hz}).",
                 code="INVALID_PARAMETER",
@@ -67,7 +71,7 @@ class MockMicrophone:
             )
         self.frequency_hz: float = float(frequency_hz)
 
-        if not isinstance(amplitude, (int, float)) or not (0.0 <= amplitude <= 1.0):
+        if not isinstance(amplitude, (int, float)) or isinstance(amplitude, bool) or not math.isfinite(amplitude) or not (0.0 <= amplitude <= 1.0):
             raise AudioError(
                 message=f"amplitude must be between 0.0 and 1.0 (received: {amplitude}).",
                 code="INVALID_PARAMETER",
@@ -76,7 +80,7 @@ class MockMicrophone:
         self.amplitude: float = float(amplitude)
 
         if total_duration_sec is not None:
-            if not isinstance(total_duration_sec, (int, float)) or total_duration_sec <= 0:
+            if not isinstance(total_duration_sec, (int, float)) or isinstance(total_duration_sec, bool) or not math.isfinite(total_duration_sec) or total_duration_sec <= 0:
                 raise AudioError(
                     message=f"total_duration_sec must be positive (received: {total_duration_sec}).",
                     code="INVALID_PARAMETER",
@@ -133,27 +137,56 @@ class MockMicrophone:
         """Close/deactivate the microphone source."""
         self._is_active = False
 
-    def _synthesize_chunk_pcm16(self, num_samples: int) -> bytes:
+    def _synthesize_chunk(self, num_samples: int) -> bytes:
         """
-        Synthesize deterministic 16-bit linear PCM audio chunk data.
+        Synthesize deterministic linear PCM audio chunk data based on format sample_width.
         Generates a clean sine wave with continuous phase across chunk boundaries.
+        Supports 1-byte (8-bit), 2-byte (16-bit), and 4-byte (32-bit int or float) sample widths.
         Supports mono (1 channel) and stereo (2 channels).
         """
-        int16_max = 32767
-        scale = self.amplitude * int16_max
         sample_rate = self.format.sample_rate
         two_pi_f = 2.0 * math.pi * self.frequency_hz
+        channels = self.format.channels
+        sample_width = self.format.sample_width
+        encoding = self.format.encoding
 
         pcm_data = bytearray()
-        channels = self.format.channels
 
         for i in range(num_samples):
             global_sample = self._sample_index + i
             t = global_sample / sample_rate
-            value = int(round(scale * math.sin(two_pi_f * t)))
-            # Clamp to 16-bit signed integer range
-            value = max(-32768, min(32767, value))
-            sample_bytes = struct.pack("<h", value)
+            sin_val = math.sin(two_pi_f * t)
+
+            if sample_width == 1:
+                # 8-bit unsigned PCM [0, 255] centered at 128
+                scaled = int(round(128.0 + 127.0 * self.amplitude * sin_val))
+                clamped = max(0, min(255, scaled))
+                sample_bytes = struct.pack("B", clamped)
+            elif sample_width == 2:
+                # 16-bit signed PCM [-32768, 32767]
+                scaled = int(round(32767.0 * self.amplitude * sin_val))
+                clamped = max(-32768, min(32767, scaled))
+                fmt_str = ">h" if encoding == "pcm_s16be" else "<h"
+                sample_bytes = struct.pack(fmt_str, clamped)
+            elif sample_width == 4:
+                if encoding in ("pcm_f32le", "pcm_f32be"):
+                    # 32-bit IEEE float [-1.0, 1.0]
+                    f_val = float(self.amplitude * sin_val)
+                    clamped_f = max(-1.0, min(1.0, f_val))
+                    fmt_str = ">f" if encoding == "pcm_f32be" else "<f"
+                    sample_bytes = struct.pack(fmt_str, clamped_f)
+                else:
+                    # 32-bit signed int [-2147483648, 2147483647]
+                    scaled = int(round(2147483647.0 * self.amplitude * sin_val))
+                    clamped = max(-2147483648, min(2147483647, scaled))
+                    fmt_str = ">i" if encoding == "pcm_s32be" else "<i"
+                    sample_bytes = struct.pack(fmt_str, clamped)
+            else:
+                raise AudioError(
+                    message=f"Unsupported sample width for mock mic synthesis: {sample_width}.",
+                    code="INVALID_SAMPLE_WIDTH",
+                    details={"sample_width": sample_width},
+                )
 
             # Replicate sample for all channels (mono or stereo)
             for _ in range(channels):
@@ -161,6 +194,10 @@ class MockMicrophone:
 
         self._sample_index += num_samples
         return bytes(pcm_data)
+
+    def _synthesize_chunk_pcm16(self, num_samples: int) -> bytes:
+        """Backwards compatibility alias for _synthesize_chunk."""
+        return self._synthesize_chunk(num_samples)
 
     def read_chunk(self) -> Optional[AudioChunk]:
         """
@@ -172,14 +209,17 @@ class MockMicrophone:
         if not self._is_active:
             return None
 
-        # Check if total duration limit reached
+        # Check if total duration limit reached.
+        # Protect against rounding overshoot (e.g. at 22050 Hz with 10 ms chunks,
+        # 220.5 rounds to 220, so 100 chunks = 0.9977 s; emitting a 101st chunk would overshoot to 1.0077 s).
         if self.total_duration_sec is not None:
-            if self._current_timestamp >= self.total_duration_sec:
+            nominal_chunk_sec = self.chunk_duration_ms / 1000.0
+            if self._current_sequence_id > 0 and (self._current_timestamp + nominal_chunk_sec / 2.0) >= self.total_duration_sec:
                 self._is_active = False
                 return None
 
         # Generate deterministic audio bytes
-        chunk_data = self._synthesize_chunk_pcm16(self.samples_per_chunk)
+        chunk_data = self._synthesize_chunk(self.samples_per_chunk)
 
         chunk = AudioChunk(
             sequence_id=self._current_sequence_id,
