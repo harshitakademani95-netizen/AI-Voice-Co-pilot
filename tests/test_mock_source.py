@@ -12,13 +12,30 @@ class TestMockMicrophone(unittest.TestCase):
     """Test MockMicrophone source generation, determinism, and streaming."""
 
     def test_mock_microphone_defaults(self):
-        """MockMicrophone default initialization."""
+        """MockMicrophone default initialization has a safe finite 1.0s duration limit."""
         mic = MockMicrophone()
         self.assertEqual(mic.format.sample_rate, 16000)
         self.assertEqual(mic.format.channels, 1)
         self.assertEqual(mic.chunk_duration_ms, 20.0)
         self.assertEqual(mic.current_sequence_id, 0)
         self.assertEqual(mic.current_timestamp, 0.0)
+        self.assertEqual(mic.total_duration_sec, 1.0)
+        self.assertTrue(mic.is_active)
+
+        # Default streaming safely finishes without hanging, producing exactly 50 chunks (1.0s)
+        chunks = list(mic.stream(simulate_realtime=False))
+        self.assertEqual(len(chunks), 50)
+        self.assertFalse(mic.is_active)
+
+    def test_mock_microphone_explicit_unbounded_streaming(self):
+        """MockMicrophone with total_duration_sec=None allows continuous unbounded streaming."""
+        mic = MockMicrophone(total_duration_sec=None)
+        self.assertIsNone(mic.total_duration_sec)
+        self.assertTrue(mic.is_active)
+
+        # Stream 10 chunks using max_chunks cap; mic remains active
+        chunks = list(mic.stream(simulate_realtime=False, max_chunks=10))
+        self.assertEqual(len(chunks), 10)
         self.assertTrue(mic.is_active)
 
     def test_mock_microphone_chunk_emission(self):

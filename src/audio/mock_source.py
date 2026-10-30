@@ -38,7 +38,7 @@ class MockMicrophone:
         chunk_duration_ms: float = 20.0,
         frequency_hz: float = 440.0,
         amplitude: float = 0.5,
-        total_duration_sec: Optional[float] = None,
+        total_duration_sec: Optional[float] = 1.0,
     ) -> None:
         """
         Initialize the MockMicrophone source.
@@ -48,7 +48,9 @@ class MockMicrophone:
             chunk_duration_ms (float): Duration per emitted chunk in milliseconds. Default: 20.0 ms.
             frequency_hz (float): Synthetic tone frequency in Hz (e.g. 440.0 for musical pitch A4).
             amplitude (float): Signal amplitude between 0.0 (silence) and 1.0 (full scale). Default: 0.5.
-            total_duration_sec (Optional[float]): Optional limit for stream duration in seconds.
+            total_duration_sec (Optional[float]): Finite stream duration limit in seconds.
+                Defaults to 1.0 s for safe, bounded execution in tests and scripts.
+                Explicitly pass total_duration_sec=None to allow continuous / unbounded streaming.
 
         Raises:
             AudioError: If parameters are invalid or out of allowable ranges.

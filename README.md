@@ -20,7 +20,7 @@ This repository delivers the **Week 1 foundation and first vertical slice** for 
 - **Deterministic Audio Chunker (`src/audio/chunker.py`)**: Slices continuous byte streams into fixed-duration `AudioChunk`s with strict frame alignment validation and reproducible outputs.
 - **Deterministic Mock Microphone Source (`src/audio/mock_source.py`)**: Generates deterministic synthetic audio streams (16-bit linear PCM) for testing and pipeline integration without requiring physical microphone hardware.
 - **Single-Command CLI Demo (`src/cli.py`)**: Real-time or batch streaming CLI demonstrating sequential chunk generation, timing progression, and metadata output.
-- **Unit Test Suite (`tests/`)**: 30 passing unit tests covering valid paths, invalid parameters, empty chunks, and corrupt unaligned payloads.
+- **Unit Test Suite (`tests/`)**: 45 passing unit tests covering valid paths, invalid parameters, empty chunks, corrupt unaligned payloads, sequence ordering, and schema serialization.
 
 ---
 
@@ -59,7 +59,7 @@ AI Voice Bot/
 | **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `11025`, `12000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
 | | `channels` | `int` | Count | Must be `1` (mono) or `2` (stereo). Default `1`. |
 | | `sample_width`| `int` | Bytes/Sample | Must be `1`, `2`, or `4`. Default `2` (16-bit PCM). |
-| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`). |
+| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`, `pcm_f32be`). |
 | **`AudioChunk`** | `sequence_id` | `int` | Counter | Strictly non-negative integer (`>= 0`), monotonically increasing. |
 | | `timestamp` | `float` | Seconds | Strictly non-negative, finite (`>= 0.0`, rejects NaN/inf), advancing by chunk duration. |
 | | `data` | `bytes` | Raw PCM | Non-empty binary bytes (bytearray input is defensively copied); byte length must be exact multiple of `format.frame_size`. |
@@ -154,7 +154,7 @@ Execute the comprehensive test suite with Python's built-in test runner (no thir
 python -m unittest discover tests -v
 ```
 
-All 39 unit tests pass, validating:
+All 45 unit tests pass, validating:
 1. Valid schema creation and metrics calculations.
 2. Rejection of invalid sample rates (negative, zero, non-integer, unsupported rates).
 3. Rejection of invalid channel counts (zero, negative, 3+ channels).
@@ -166,8 +166,10 @@ All 39 unit tests pass, validating:
 9. Stream overshoot protection preventing sample rounding drift at non-standard rates (e.g. 22050 Hz).
 10. Defensive copy of mutable `bytearray` inputs to preserve `AudioChunk` immutability.
 11. Robust error wrapping in `from_dict()` for missing keys, corrupt base64, and non-dict payloads.
-12. Encoding compatibility validation against sample widths (rejecting invalid names like `"banana"`).
-13. API error dictionary serialization with `request_id` per Doc 04, section 5.
+12. Required field validation in `AudioFormat.from_dict()` preventing silent default assignments.
+13. Strict monotonic sequence ID and timestamp stream ordering validation (`AudioChunker.validate_sequence`).
+14. Encoding compatibility validation against sample widths (rejecting invalid names like `"banana"`).
+15. API error dictionary serialization with `request_id` per Doc 04, section 5.
 
 ---
 
@@ -188,5 +190,5 @@ Features included in the dashboard:
 - **Real-Time Audio Waveform:** HTML5 Canvas visualizer rendering live PCM chunks.
 - **Start / Stop Stream & Clear:** Real-time Server-Sent Events (SSE) streaming with live metric meters.
 - **AudioChunks Table:** Real-time log of received chunks showing sequence IDs, timestamps, byte sizes, and formats.
-- **Dynamic Unit Test Runner:** Runs the 30-test suite on demand and displays actual test execution results.
+- **Dynamic Unit Test Runner:** Runs the 45-test suite on demand and displays actual test execution results.
 

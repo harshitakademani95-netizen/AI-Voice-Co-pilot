@@ -147,7 +147,14 @@ class AudioFormat:
         encoding:
             - Type: str
             - Units: Identifier string
-            - Constraints: Must be non-empty string. Default: "pcm_s16le" (signed 16-bit little-endian PCM).
+            - Constraints: Only supported PCM encoding identifiers matching sample_width
+                           are accepted:
+                           - 1 byte (8-bit): 'pcm_u8', 'pcm_s8'
+                           - 2 bytes (16-bit): 'pcm_s16le', 'pcm_s16be'
+                           - 4 bytes (32-bit): 'pcm_s32le', 'pcm_s32be', 'pcm_f32le', 'pcm_f32be'
+                           Default: 'pcm_s16le' (width 2), 'pcm_u8' (width 1), 'pcm_s32le' (width 4).
+                           Unsupported codec names (e.g. 'banana') or encodings incompatible with
+                           sample_width will raise AudioError with code 'INVALID_ENCODING'.
     """
 
     sample_rate: int = 16000
@@ -283,16 +290,45 @@ class AudioFormat:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AudioFormat:
-        """Construct an AudioFormat instance from a dictionary."""
+        """
+        Construct an AudioFormat instance from a dictionary.
+
+        Required fields:
+            - 'sample_rate': Must be an integer matching one of SUPPORTED_SAMPLE_RATES.
+            - 'channels': Must be an integer matching one of SUPPORTED_CHANNELS (1 or 2).
+
+        Optional fields:
+            - 'sample_width': Sample bit depth in bytes (1, 2, or 4). Defaults to 2 if omitted.
+            - 'encoding': Codec identifier string. Defaults based on sample_width if omitted.
+
+        Raises:
+            AudioError: If data is not a dict (INVALID_PAYLOAD), if required fields
+                        are missing (INVALID_PAYLOAD), or if values fail schema validation.
+        """
         if not isinstance(data, dict):
             raise AudioError(
                 message=f"Format payload must be a dictionary (received: {type(data).__name__}).",
                 code="INVALID_PAYLOAD",
                 details={"data_type": type(data).__name__},
             )
+
+        if "sample_rate" not in data:
+            raise AudioError(
+                message="Missing required field 'sample_rate' in format dictionary payload.",
+                code="INVALID_PAYLOAD",
+                details={"missing_key": "sample_rate", "keys_provided": list(data.keys())},
+            )
+
+        if "channels" not in data:
+            raise AudioError(
+                message="Missing required field 'channels' in format dictionary payload.",
+                code="INVALID_PAYLOAD",
+                details={"missing_key": "channels", "keys_provided": list(data.keys())},
+            )
+
         return cls(
-            sample_rate=data.get("sample_rate", 16000),
-            channels=data.get("channels", 1),
+            sample_rate=data["sample_rate"],
+            channels=data["channels"],
             sample_width=data.get("sample_width", 2),
             encoding=data.get("encoding"),
         )
@@ -483,8 +519,10 @@ class AudioChunk:
                 details={"missing_key": "timestamp"},
             )
 
-        raw_format = payload.get("format", {})
-        if isinstance(raw_format, AudioFormat):
+        raw_format = payload.get("format")
+        if raw_format is None:
+            format_obj = AudioFormat()
+        elif isinstance(raw_format, AudioFormat):
             format_obj = raw_format
         elif isinstance(raw_format, dict):
             format_obj = AudioFormat.from_dict(raw_format)
@@ -492,7 +530,7 @@ class AudioChunk:
             raise AudioError(
                 message=f"Invalid format specification in dictionary (received: {type(raw_format).__name__}).",
                 code="INVALID_FORMAT",
-                details={"format": raw_format},
+                details={"format": type(raw_format).__name__},
             )
 
         data_b64 = payload.get("data_b64")

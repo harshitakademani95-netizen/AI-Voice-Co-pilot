@@ -96,8 +96,74 @@ class TestAudioSchemas(unittest.TestCase):
         self.assertIsNotNone(AudioFormat.__doc__)
         self.assertIn("sample_rate", AudioFormat.__doc__)
         self.assertIn("channels", AudioFormat.__doc__)
+        self.assertIn("encoding", AudioFormat.__doc__)
 
         self.assertIsNotNone(AudioError.__doc__)
+
+    def test_audio_format_from_dict_validation(self):
+        """AudioFormat.from_dict validates required fields and does not silently default missing keys."""
+        # Valid explicit format dictionary
+        fmt = AudioFormat.from_dict({"sample_rate": 48000, "channels": 2})
+        self.assertEqual(fmt.sample_rate, 48000)
+        self.assertEqual(fmt.channels, 2)
+        self.assertEqual(fmt.sample_width, 2)
+        self.assertEqual(fmt.encoding, "pcm_s16le")
+
+        # Missing sample_rate
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat.from_dict({"channels": 1})
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+        self.assertIn("sample_rate", ctx.exception.message)
+
+        # Missing channels
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat.from_dict({"sample_rate": 16000})
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+        self.assertIn("channels", ctx.exception.message)
+
+        # Empty dictionary
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat.from_dict({})
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+
+        # Non-dictionary payload
+        with self.assertRaises(AudioError) as ctx:
+            AudioFormat.from_dict("not-a-dict")  # type: ignore
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+
+    def test_audio_chunk_from_dict_with_incomplete_format(self):
+        """AudioChunk.from_dict rejects malformed or incomplete nested format dictionaries."""
+        raw_b64 = "AAAA"
+
+        # Incomplete format dictionary (empty dict)
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({
+                "sequence_id": 0,
+                "timestamp": 0.0,
+                "data_b64": raw_b64,
+                "format": {},
+            })
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+
+        # Incomplete format dictionary (missing channels)
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({
+                "sequence_id": 0,
+                "timestamp": 0.0,
+                "data_b64": raw_b64,
+                "format": {"sample_rate": 16000},
+            })
+        self.assertEqual(ctx.exception.code, "INVALID_PAYLOAD")
+
+        # Invalid format type (string instead of dict/AudioFormat)
+        with self.assertRaises(AudioError) as ctx:
+            AudioChunk.from_dict({
+                "sequence_id": 0,
+                "timestamp": 0.0,
+                "data_b64": raw_b64,
+                "format": "invalid-format-string",
+            })
+        self.assertEqual(ctx.exception.code, "INVALID_FORMAT")
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ class AudioChunker:
         """
         self.format: AudioFormat = audio_format if audio_format is not None else AudioFormat()
 
-        if not isinstance(chunk_duration_ms, (int, float)) or chunk_duration_ms <= 0:
+        if not isinstance(chunk_duration_ms, (int, float)) or isinstance(chunk_duration_ms, bool) or not math.isfinite(chunk_duration_ms) or chunk_duration_ms <= 0:
             raise AudioError(
                 message=f"Chunk duration must be a positive number in milliseconds (received: {chunk_duration_ms}).",
                 code="INVALID_CHUNK_DURATION",
@@ -127,8 +127,22 @@ class AudioChunker:
                 },
             )
 
+        if not isinstance(start_sequence_id, int) or isinstance(start_sequence_id, bool) or start_sequence_id < 0:
+            raise AudioError(
+                message=f"start_sequence_id must be a non-negative integer (received: {start_sequence_id}).",
+                code="INVALID_SEQUENCE_ID",
+                details={"start_sequence_id": start_sequence_id},
+            )
+
+        if not isinstance(start_timestamp, (int, float)) or isinstance(start_timestamp, bool) or not math.isfinite(start_timestamp) or start_timestamp < 0:
+            raise AudioError(
+                message=f"start_timestamp must be a non-negative, finite number (received: {start_timestamp}).",
+                code="INVALID_TIMESTAMP",
+                details={"start_timestamp": start_timestamp},
+            )
+
         current_seq_id = start_sequence_id
-        current_time = start_timestamp
+        current_time = float(start_timestamp)
         chunk_step_sec = self.samples_per_chunk / float(self.format.sample_rate)
 
         total_bytes = len(raw_audio)
@@ -184,3 +198,80 @@ class AudioChunker:
                 drop_incomplete_tail=drop_incomplete_tail,
             )
         )
+
+    @staticmethod
+    def validate_sequence(chunks: Any) -> List[AudioChunk]:
+        """
+        Validate that an iterable or sequence of AudioChunks forms a strictly ordered stream.
+
+        Verifies:
+            1. Every element is an AudioChunk instance.
+            2. sequence_ids are strictly monotonically increasing (chunk[i].sequence_id > chunk[i-1].sequence_id).
+            3. timestamps are strictly advancing (chunk[i].timestamp > chunk[i-1].timestamp).
+
+        Returns:
+            List[AudioChunk]: The validated list of audio chunks.
+
+        Raises:
+            AudioError: With code 'INVALID_PAYLOAD' if chunks input is not an iterable.
+            AudioError: With code 'EMPTY_CHUNK_DATA' if chunk list is empty.
+            AudioError: With code 'INVALID_CHUNK_DATA' if an item is not an AudioChunk.
+            AudioError: With code 'INVALID_SEQUENCE_ORDER' if sequence IDs decrease or repeat.
+            AudioError: With code 'INVALID_TIMESTAMP_ORDER' if timestamps decrease or repeat.
+        """
+        if not hasattr(chunks, "__iter__"):
+            raise AudioError(
+                message=f"Expected iterable of AudioChunk instances (received: {type(chunks).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"type": type(chunks).__name__},
+            )
+
+        chunk_list = list(chunks)
+        if not chunk_list:
+            raise AudioError(
+                message="Cannot validate empty chunk sequence (0 chunks received).",
+                code="EMPTY_CHUNK_DATA",
+                details={"count": 0},
+            )
+
+        prev_chunk: Optional[AudioChunk] = None
+        for idx, chunk in enumerate(chunk_list):
+            if not isinstance(chunk, AudioChunk):
+                raise AudioError(
+                    message=f"Item at index {idx} is not an AudioChunk (got {type(chunk).__name__}).",
+                    code="INVALID_CHUNK_DATA",
+                    details={"index": idx, "type": type(chunk).__name__},
+                )
+
+            if prev_chunk is not None:
+                if chunk.sequence_id <= prev_chunk.sequence_id:
+                    raise AudioError(
+                        message=(
+                            f"Non-increasing sequence ID at index {idx}: current {chunk.sequence_id} "
+                            f"<= previous {prev_chunk.sequence_id}."
+                        ),
+                        code="INVALID_SEQUENCE_ORDER",
+                        details={
+                            "index": idx,
+                            "current_sequence_id": chunk.sequence_id,
+                            "previous_sequence_id": prev_chunk.sequence_id,
+                        },
+                    )
+
+                if chunk.timestamp <= prev_chunk.timestamp:
+                    raise AudioError(
+                        message=(
+                            f"Non-advancing timestamp at index {idx}: current {chunk.timestamp} "
+                            f"<= previous {prev_chunk.timestamp}."
+                        ),
+                        code="INVALID_TIMESTAMP_ORDER",
+                        details={
+                            "index": idx,
+                            "current_timestamp": chunk.timestamp,
+                            "previous_timestamp": prev_chunk.timestamp,
+                        },
+                    )
+
+            prev_chunk = chunk
+
+        return chunk_list
