@@ -70,3 +70,14 @@ credentials.json
 *.swo
 .DS_Store
 Thumbs.db
+
+# Frontend (Node / React / Vite)
+node_modules/
+.pnp
+.pnp.js
+.vite/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*

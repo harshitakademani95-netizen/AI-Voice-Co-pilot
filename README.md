@@ -441,3 +441,33 @@ python scripts/demo_day7.py
 `powershell
 python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors.py tests/test_sessions.py -v
 `
+
+---
+
+# Part 5: Workstream W6 – Frontend & UX (Varsha B S)
+
+> **Developer**: Varsha B S
+> **Workstream**: W6 – Frontend and UX
+> **Test Suite**: 41 Automated Component, Contract, and Hook Tests (100% Passing)
+
+## 1. Overview & Capabilities
+
+- **Accessible App Shell**: Complete desktop assistant layout featuring keyboard navigation, visible focus indicators, skip-link, and ARIA landmarks.
+- **Mock-Mode Banner**: Clear indicator of offline mock-mode operation with built-in simulated network latency and error injection.
+- **Session Controls**: State management for initiating, pausing, resuming, ending, and resetting sessions with live turn and duration tracking.
+- **Microphone & Voice States**: State machine for permissions ('prompt', 'granted', 'denied') and activity ('idle', 'listening', 'processing', 'speaking', 'muted') with interruption controls.
+- **Transcript & Execution Timeline**: Chronological feed rendering user speech, context captures, AI reasoning, tool execution, and Human-in-the-Loop Safety Approval Cards.
+- **Typed API Client**: Strict TypeScript contracts matching SDD API specification with standardized error handling.
+- **Day 7 Interactive Demo Runner**: Stepper and autoplay controller for vertical slice demonstrations.
+
+## 2. How to Run Frontend Locally
+
+``bash
+npm install
+npm run dev
+``
+
+### Run Frontend Unit & Component Tests
+``bash
+npm test
+``
