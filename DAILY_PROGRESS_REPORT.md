@@ -125,7 +125,7 @@
   - `tests/test_mock_source.py`
   - `.gitignore`
 - **Tests run (command + result):**
-  - `python -m unittest discover tests -v` -> Ran 30 tests in 0.015s, 30 passed, 0 failures, 0 errors.
+  - `python -m unittest discover tests -v` -> Ran 39 tests in 0.040s, 39 passed, 0 failures, 0 errors.
 - **GitHub branch / PR link:**
   - Branch: `feature/w1-audio-foundation`
 - **Blockers:**
@@ -153,7 +153,7 @@
   - `PULL_REQUEST.md`
   - `DAILY_PROGRESS_REPORT.md`
 - **Tests run (command + result):**
-  - `python -m unittest discover tests -v` -> 30/30 tests passed (OK).
+  - `python -m unittest discover tests -v` -> 39/39 tests passed (OK).
   - `python -m src.cli --duration 0.1` -> Output verified and completed cleanly.
 - **GitHub branch / PR link:**
   - Branch: `feature/w1-audio-foundation`
