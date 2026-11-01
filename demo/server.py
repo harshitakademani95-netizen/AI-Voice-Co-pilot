@@ -956,11 +956,10 @@ async def stream_audio_events(fixture: str = "A", speed: int = 100) -> Streaming
                 await asyncio.sleep(delay_sec)
 
             chunk = AudioChunk(
-                data=dummy_pcm,
-                sequence_number=step,
+                sequence_id=step,
                 timestamp=step * 0.1,
-                duration_ms=100.0,
-                is_last=(step == total_steps - 1),
+                data=dummy_pcm,
+                metadata={"duration_ms": 100.0, "is_last": (step == total_steps - 1)},
             )
             chunk_counter += 1
             events = transcriber.transcribe_chunk(chunk)

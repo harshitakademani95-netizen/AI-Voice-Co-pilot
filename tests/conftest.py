@@ -58,13 +58,10 @@ def sample_audio_chunks(sample_audio_bytes: bytes) -> List["AudioChunk"]:
     for i in range(5):
         chunks.append(
             AudioChunk(
-                chunk_id=f"chunk-{i:03d}",
-                data=sample_audio_bytes,
-                sequence_number=i,
+                sequence_id=i,
                 timestamp=i * 0.1,
-                duration_ms=100.0,
-                sample_rate=16000,
-                is_last=(i == 4),
+                data=sample_audio_bytes,
+                metadata={"chunk_id": f"chunk-{i:03d}", "duration_ms": 100.0, "is_last": (i == 4)},
             )
         )
     return chunks

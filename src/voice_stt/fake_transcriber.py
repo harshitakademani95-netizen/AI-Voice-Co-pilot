@@ -154,7 +154,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             raise RuntimeError("Cannot transcribe on a closed STT adapter.")
 
         audio = self._coerce_audio_chunk(chunk, sequence_number=self._chunks_processed, is_last=is_last)
-        chunk_seq = audio.sequence_number
+        chunk_seq = audio.sequence_id if isinstance(audio, AudioChunk) else getattr(audio, "sequence_number", self._chunks_processed)
         self._state = STTAdapterState.PROCESSING
 
         # Check for simulated error injection
@@ -175,7 +175,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             return [error_event]
 
         # Calculate chunk duration and time offsets
-        chunk_duration = audio.duration_ms / 1000.0 if audio.duration_ms > 0 else 0.1
+        chunk_dur_ms = float(audio.metadata.get("duration_ms", audio.duration_ms)) if isinstance(audio, AudioChunk) else getattr(audio, "duration_ms", 100.0)
+        chunk_duration = chunk_dur_ms / 1000.0 if chunk_dur_ms > 0 else 0.1
         chunk_start = self._elapsed_time
         chunk_end = chunk_start + chunk_duration
         self._elapsed_time = chunk_end
@@ -189,7 +190,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         else:
             events.extend(self._process_hash_chunk(audio, chunk_start, chunk_end))
 
-        if audio.is_last and self.fixture is None:
+        chunk_is_last = bool(audio.metadata.get("is_last", False)) if isinstance(audio, AudioChunk) else getattr(audio, "is_last", False)
+        if chunk_is_last and self.fixture is None:
             stream_completed_event = TranscriptEvent(
                 event_id=self._deterministic_uuid(f"stream-completed-{chunk_seq}"),
                 event_type=TranscriptEventType.STREAM_COMPLETED,
@@ -233,8 +235,9 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
     ) -> List[TranscriptEvent]:
         """Emit deterministic events driven by pre-configured script."""
         events: List[TranscriptEvent] = []
+        audio_is_last = bool(audio.metadata.get("is_last", False)) if isinstance(audio, AudioChunk) else getattr(audio, "is_last", False)
         if not self.script or self._current_script_idx >= len(self.script):
-            if audio.is_last and self._active_sentence_words:
+            if audio_is_last and self._active_sentence_words:
                 events.append(self._flush_active_sentence(chunk_start, chunk_end))
             return events
 
@@ -248,8 +251,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             self._active_sentence_words.append(new_word)
             self._current_word_idx += 1
 
-            is_last_in_script = (self._current_script_idx == len(self.script) - 1 and audio.is_last)
-            is_sentence_complete = bool(self._current_word_idx >= len(tokens) or audio.is_last or is_last_in_script)
+            is_last_in_script = (self._current_script_idx == len(self.script) - 1 and audio_is_last)
+            is_sentence_complete = bool(self._current_word_idx >= len(tokens) or audio_is_last or is_last_in_script)
 
             if not is_sentence_complete and self.config.interim_results:
                 interim_text = " ".join(self._active_sentence_words)
@@ -345,14 +348,16 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         if self._sentence_start is None:
             self._sentence_start = chunk_start
 
+        audio_is_last = bool(audio.metadata.get("is_last", False)) if isinstance(audio, AudioChunk) else getattr(audio, "is_last", False)
+        chunk_seq = audio.sequence_id if isinstance(audio, AudioChunk) else getattr(audio, "sequence_number", 0)
         self._active_sentence_words.append(selected_word)
-        should_finalize = (len(self._active_sentence_words) >= 3) or audio.is_last
+        should_finalize = (len(self._active_sentence_words) >= 3) or audio_is_last
 
         if not should_finalize and self.config.interim_results:
             interim_text = " ".join(self._active_sentence_words)
             conf = 0.80 + ((h % 100) / 1000.0)
             interim_segment = TranscriptSegment(
-                segment_id=self._deterministic_uuid(f"hash-seg-interim-{audio.sequence_number}"),
+                segment_id=self._deterministic_uuid(f"hash-seg-interim-{chunk_seq}"),
                 text=interim_text,
                 start_time=self._sentence_start if self._sentence_start is not None else chunk_start,
                 end_time=chunk_end,
@@ -362,7 +367,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             )
             events.append(
                 TranscriptEvent(
-                    event_id=self._deterministic_uuid(f"hash-evt-interim-{audio.sequence_number}"),
+                    event_id=self._deterministic_uuid(f"hash-evt-interim-{chunk_seq}"),
                     event_type=TranscriptEventType.INTERIM,
                     sequence_number=self._events_emitted,
                     timestamp=chunk_end,
@@ -394,7 +399,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             ]
 
             final_segment = TranscriptSegment(
-                segment_id=self._deterministic_uuid(f"hash-seg-final-{audio.sequence_number}"),
+                segment_id=self._deterministic_uuid(f"hash-seg-final-{chunk_seq}"),
                 text=final_text,
                 start_time=sentence_start,
                 end_time=sentence_end,
@@ -405,7 +410,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             )
             events.append(
                 TranscriptEvent(
-                    event_id=self._deterministic_uuid(f"hash-evt-final-{audio.sequence_number}"),
+                    event_id=self._deterministic_uuid(f"hash-evt-final-{chunk_seq}"),
                     event_type=TranscriptEventType.FINAL,
                     sequence_number=self._events_emitted,
                     timestamp=sentence_end,
