@@ -83,12 +83,10 @@ def run_fixture_demo(fixture_id: str = "A", fast: bool = False) -> int:
     with transcriber:
         for idx in range(total_chunks):
             chunk = AudioChunk(
-                chunk_id=f"chk-{idx:03d}",
-                data=dummy_payload,
-                sequence_number=idx,
+                sequence_id=idx,
                 timestamp=idx * 0.1,
-                duration_ms=100.0,
-                is_last=(idx == total_chunks - 1),
+                data=dummy_payload,
+                metadata={"chunk_id": f"chk-{idx:03d}", "duration_ms": 100.0, "is_last": (idx == total_chunks - 1)},
             )
             events = transcriber.transcribe_chunk(chunk)
 
@@ -143,7 +141,7 @@ def run_fixture_demo(fixture_id: str = "A", fast: bool = False) -> int:
     transcriber.reset()
     events_pass1: List[str] = []
     for idx in range(total_chunks):
-        c = AudioChunk(data=dummy_payload, sequence_number=idx, timestamp=idx * 0.1, duration_ms=100.0)
+        c = AudioChunk(sequence_id=idx, timestamp=idx * 0.1, data=dummy_payload, metadata={"duration_ms": 100.0})
         for ev in transcriber.transcribe_chunk(c):
             events_pass1.append(ev.model_dump_json())
 
@@ -151,7 +149,7 @@ def run_fixture_demo(fixture_id: str = "A", fast: bool = False) -> int:
     t2.initialize()
     events_pass2: List[str] = []
     for idx in range(total_chunks):
-        c = AudioChunk(data=dummy_payload, sequence_number=idx, timestamp=idx * 0.1, duration_ms=100.0)
+        c = AudioChunk(sequence_id=idx, timestamp=idx * 0.1, data=dummy_payload, metadata={"duration_ms": 100.0})
         for ev in t2.transcribe_chunk(c):
             events_pass2.append(ev.model_dump_json())
 

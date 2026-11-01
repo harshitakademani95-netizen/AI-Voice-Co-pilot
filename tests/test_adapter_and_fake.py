@@ -179,9 +179,10 @@ class TestDeterministicFakeTranscriber:
         transcriber = DeterministicFakeTranscriber(script=["Final word here."])
         transcriber.initialize()
         chunk = AudioChunk(
+            sequence_id=0,
+            timestamp=0.0,
             data=b"\x00\x01" * 800,
-            sequence_number=0,
-            is_last=False,
+            metadata={"is_last": False, "duration_ms": 100.0},
         )
         events = transcriber.transcribe_chunk(chunk, is_last=True)
         event_types = [e.event_type for e in events]
@@ -194,7 +195,12 @@ class TestDeterministicFakeTranscriber:
         transcriber.initialize()
         # All chunks have is_last=False
         chunks = [
-            AudioChunk(data=b"\x00\x01" * 800, sequence_number=i, is_last=False)
+            AudioChunk(
+                sequence_id=i,
+                timestamp=i * 0.1,
+                data=b"\x00\x01" * 800,
+                metadata={"is_last": False, "duration_ms": 100.0},
+            )
             for i in range(4)
         ]
         events = list(transcriber.transcribe_stream(chunks))
@@ -258,11 +264,10 @@ class TestSentenceTimestampSpanRegression:
         transcriber.initialize()
         chunks = [
             AudioChunk(
-                data=b"\x00\x01" * 800,
-                sequence_number=i,
+                sequence_id=i,
                 timestamp=i * 0.1,
-                duration_ms=100.0,
-                is_last=(i == 6),
+                data=b"\x00\x01" * 800,
+                metadata={"duration_ms": 100.0, "is_last": (i == 6)},
             )
             for i in range(7)
         ]
@@ -304,11 +309,10 @@ class TestSentenceTimestampSpanRegression:
         # 5 chunks of 200ms
         chunks = [
             AudioChunk(
-                data=b"\x00\x01" * 800,
-                sequence_number=i,
+                sequence_id=i,
                 timestamp=i * 0.2,
-                duration_ms=200.0,
-                is_last=(i == 4),
+                data=b"\x00\x01" * 800,
+                metadata={"duration_ms": 200.0, "is_last": (i == 4)},
             )
             for i in range(5)
         ]
@@ -340,11 +344,10 @@ class TestSentenceTimestampSpanRegression:
         # Feed 6 chunks of 150ms: creates two 3-word sentences
         chunks = [
             AudioChunk(
-                data=b"\x12\x34" * (i + 1) * 200,
-                sequence_number=i,
+                sequence_id=i,
                 timestamp=i * 0.15,
-                duration_ms=150.0,
-                is_last=(i == 5),
+                data=b"\x12\x34" * (i + 1) * 200,
+                metadata={"duration_ms": 150.0, "is_last": (i == 5)},
             )
             for i in range(6)
         ]
@@ -384,7 +387,7 @@ class TestSentenceTimestampSpanRegression:
         )
         transcriber.initialize()
         # Feed 1 chunk of 500ms
-        chunk0 = AudioChunk(data=b"\x00\x01" * 800, sequence_number=0, timestamp=0.0, duration_ms=500.0, is_last=False)
+        chunk0 = AudioChunk(sequence_id=0, timestamp=0.0, data=b"\x00\x01" * 800, metadata={"duration_ms": 500.0, "is_last": False})
         transcriber.transcribe_chunk(chunk0)
         assert transcriber._sentence_start == pytest.approx(0.0)
         assert len(transcriber._active_sentence_words) == 1
@@ -396,9 +399,9 @@ class TestSentenceTimestampSpanRegression:
 
         # Now start completely new stream with offset timestamps (e.g. at 10.0s)
         new_chunks = [
-            AudioChunk(data=b"\x00\x01" * 800, sequence_number=0, timestamp=10.0, duration_ms=200.0, is_last=False),
-            AudioChunk(data=b"\x00\x01" * 800, sequence_number=1, timestamp=10.2, duration_ms=200.0, is_last=False),
-            AudioChunk(data=b"\x00\x01" * 800, sequence_number=2, timestamp=10.4, duration_ms=200.0, is_last=True),
+            AudioChunk(sequence_id=0, timestamp=10.0, data=b"\x00\x01" * 800, metadata={"duration_ms": 200.0, "is_last": False}),
+            AudioChunk(sequence_id=1, timestamp=10.2, data=b"\x00\x01" * 800, metadata={"duration_ms": 200.0, "is_last": False}),
+            AudioChunk(sequence_id=2, timestamp=10.4, data=b"\x00\x01" * 800, metadata={"duration_ms": 200.0, "is_last": True}),
         ]
         new_events = list(transcriber.transcribe_stream(new_chunks))
         final_events = [e for e in new_events if e.event_type == TranscriptEventType.FINAL]
@@ -417,7 +420,7 @@ class TestSentenceTimestampSpanRegression:
         )
         transcriber.initialize()
         chunks = [
-            AudioChunk(data=b"\x00\x01" * 800, sequence_number=i, timestamp=i * 0.1, duration_ms=100.0, is_last=(i == 3))
+            AudioChunk(sequence_id=i, timestamp=i * 0.1, data=b"\x00\x01" * 800, metadata={"duration_ms": 100.0, "is_last": (i == 3)})
             for i in range(4)
         ]
         events = list(transcriber.transcribe_stream(chunks))

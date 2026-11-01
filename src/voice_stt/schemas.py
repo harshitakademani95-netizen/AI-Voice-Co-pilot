@@ -6,7 +6,7 @@ data contracts across the platform:
 - `TranscriptEvent`: Streaming event emitted by STT transcribers/adapters.
 - `WordTiming`: Word-level alignment and confidence score.
 - `STTErrorDetail`: Structured error model conforming to API Specifications & Interface Contracts (doc 04), Section 5 standard error format.
-- `AudioChunk`: Structured audio slice contract for streaming input.
+- `AudioChunk`: Reused from shared audio schema (src.schemas.audio).
 
 Time Measurement Conventions:
 - Audio Time: `start_time` and `end_time` in `TranscriptSegment` and `WordTiming`
@@ -30,6 +30,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -389,64 +390,11 @@ class TranscriptEvent(BaseModel):
         return self
 
 
-class AudioChunk(BaseModel):
-    """Raw or PCM audio slice streamed into an STT adapter.
+# ---------------------------------------------------------------------------
+# Reused canonical AudioChunk schema from src/schemas/audio.py (Workstream W1)
+# ---------------------------------------------------------------------------
 
-    Attributes:
-        chunk_id: Unique identifier for the chunk.
-        data: Binary audio payload (PCM, WAV, or Opus bytes).
-        sequence_number: Sequence counter for chunk order verification (>= 0).
-        timestamp: Timestamp of the audio chunk onset in seconds (audio time, finite, >= 0.0).
-        duration_ms: Duration of the chunk in milliseconds (finite, >= 0.0).
-        sample_rate: Sample rate in Hz (e.g. 16000).
-        is_last: Flag indicating if this is the final chunk in the stream.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    chunk_id: str = Field(
-        default_factory=lambda: str(uuid4()),
-        description="Unique chunk identifier.",
-    )
-    data: bytes = Field(
-        ...,
-        description="Raw audio byte content.",
-    )
-    sequence_number: int = Field(
-        ...,
-        ge=0,
-        description="Monotonically non-decreasing chunk sequence number (>= 0).",
-    )
-    timestamp: float = Field(
-        default=0.0,
-        ge=0.0,
-        description="Stream onset timestamp for this chunk in seconds (audio time, finite, >= 0.0).",
-    )
-    duration_ms: float = Field(
-        default=100.0,
-        ge=0.0,
-        description="Audio slice duration in milliseconds (finite, >= 0.0).",
-    )
-    sample_rate: int = Field(
-        default=16000,
-        gt=0,
-        description="Sampling frequency in Hz (typically 16000 for voice pipelines).",
-    )
-    is_last: bool = Field(
-        default=False,
-        description="True if this is the final stream packet / end-of-speech delimiter.",
-    )
-
-    @field_validator("timestamp", "duration_ms")
-    @classmethod
-    def validate_finite_floats(cls, v: float, info: Any) -> float:
-        if not math.isfinite(v):
-            raise STTValidationError(f"AudioChunk '{info.field_name}' must be finite.", field_name=info.field_name)
-        return v
-
-    @field_validator("data", mode="before")
-    @classmethod
-    def validate_non_empty_bytes(cls, v: Any) -> bytes:
-        if not isinstance(v, (bytes, bytearray)):
-            raise STTValidationError("AudioChunk data must be bytes or bytearray.", field_name="data")
-        return bytes(v)
+try:
+    from src.schemas.audio import AudioChunk, AudioError, AudioFormat
+except ImportError:
+    from schemas.audio import AudioChunk, AudioError, AudioFormat

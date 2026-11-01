@@ -26,13 +26,10 @@ class TestEndToEndPipeline:
             # Simulate 20 streaming 100ms audio chunks
             for i in range(20):
                 chunk = AudioChunk(
-                    chunk_id=f"stream-{i:03d}",
-                    data=sample_audio_bytes,
-                    sequence_number=i,
+                    sequence_id=i,
                     timestamp=i * 0.1,
-                    duration_ms=100.0,
-                    sample_rate=16000,
-                    is_last=(i == 19),
+                    data=sample_audio_bytes,
+                    metadata={"chunk_id": f"stream-{i:03d}", "duration_ms": 100.0, "is_last": (i == 19)},
                 )
                 events = transcriber.transcribe_chunk(chunk)
                 for event in events:

@@ -5,6 +5,8 @@ from pydantic import ValidationError
 
 from voice_stt.schemas import (
     AudioChunk,
+    AudioError,
+    AudioFormat,
     STTErrorDetail,
     STTValidationError,
     TranscriptEvent,
@@ -305,27 +307,30 @@ class TestAudioChunkSchema:
 
     def test_valid_audio_chunk(self, sample_audio_bytes: bytes) -> None:
         chunk = AudioChunk(
-            data=sample_audio_bytes,
-            sequence_number=0,
+            sequence_id=0,
             timestamp=0.0,
-            duration_ms=100.0,
-            sample_rate=16000,
+            data=sample_audio_bytes,
+            format=AudioFormat(sample_rate=16000),
+            metadata={"duration_ms": 100.0},
         )
         assert len(chunk.data) == len(sample_audio_bytes)
-        assert chunk.sample_rate == 16000
-        assert chunk.sequence_number == 0
+        assert chunk.format.sample_rate == 16000
+        assert chunk.sequence_id == 0
 
     def test_reject_non_bytes_audio_data(self) -> None:
-        with pytest.raises((ValidationError, STTValidationError)) as exc_info:
+        with pytest.raises(AudioError) as exc_info:
             AudioChunk(
+                sequence_id=0,
+                timestamp=0.0,
                 data="not-bytes-string",  # type: ignore[arg-type]
-                sequence_number=0,
             )
-        assert "must be bytes or bytearray" in str(exc_info.value)
+        assert "INVALID_CHUNK_DATA" in str(exc_info.value)
 
     def test_reject_negative_sequence_number(self, sample_audio_bytes: bytes) -> None:
-        with pytest.raises(ValidationError):
+        with pytest.raises(AudioError) as exc_info:
             AudioChunk(
+                sequence_id=-1,
+                timestamp=0.0,
                 data=sample_audio_bytes,
-                sequence_number=-1,
             )
+        assert "INVALID_SEQUENCE_ID" in str(exc_info.value)

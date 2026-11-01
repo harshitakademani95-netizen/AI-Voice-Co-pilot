@@ -25,6 +25,7 @@ Architecture Contract:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 from enum import Enum
 from typing import Any, Dict, Iterable, Iterator, List, Optional
 from uuid import uuid4
@@ -33,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from voice_stt.schemas import (
     AudioChunk,
+    AudioFormat,
     STTErrorDetail,
     TranscriptEvent,
 )
@@ -194,7 +196,7 @@ class BaseSTTAdapter(ABC):
             return
 
         for current in it:
-            events = self.transcribe_chunk(prev, is_last=getattr(prev, "is_last", False))
+            events = self.transcribe_chunk(prev, is_last=(bool(prev.metadata.get("is_last", False)) if isinstance(prev, AudioChunk) else getattr(prev, "is_last", False)))
             for event in events:
                 yield event
             prev = current
@@ -230,17 +232,19 @@ class BaseSTTAdapter(ABC):
     ) -> AudioChunk:
         """Helper to normalize raw bytes into a strongly-typed AudioChunk."""
         if isinstance(chunk, AudioChunk):
-            if is_last and not chunk.is_last:
-                return chunk.model_copy(update={"is_last": True})
+            chunk_is_last = bool(chunk.metadata.get("is_last", False))
+            if is_last and not chunk_is_last:
+                new_meta = dict(chunk.metadata)
+                new_meta["is_last"] = True
+                return replace(chunk, metadata=new_meta)
             return chunk
         elif isinstance(chunk, (bytes, bytearray)):
             return AudioChunk(
-                data=bytes(chunk),
-                sequence_number=sequence_number,
+                sequence_id=sequence_number,
                 timestamp=self._chunks_processed * 0.1,
-                duration_ms=100.0,
-                sample_rate=self.config.sample_rate,
-                is_last=is_last,
+                data=bytes(chunk),
+                format=AudioFormat(sample_rate=self.config.sample_rate),
+                metadata={"is_last": is_last, "duration_ms": 100.0},
             )
         else:
             raise TypeError(f"Expected AudioChunk or bytes, received {type(chunk).__name__}")
