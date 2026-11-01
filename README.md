@@ -672,7 +672,7 @@ python demo/live_demo.py --all
 **Developer**: Amruta A J
 **Workstream**: W3 – Context & Reasoning
 **Sprint / Duration**: Week 1 (Day 1 – Day 7 Foundation & First Vertical Slice)
-**Status**: Completed & Validated (54/54 Unit Tests Passing)
+**Status**: Completed & Validated (58/58 Unit Tests Passing)
 
 ---
 
@@ -685,7 +685,7 @@ In strict accordance with the assigned scope for **Workstream W3**, this module 
 2. **Synthetic Context Fixtures**: Fictional developer and document workspace fixtures with **screen capture disabled by default** (`capture_enabled=False`, enforced by model validators).
 3. **Deterministic Mock Reasoning**: A predictable, repeatable reasoning engine that produces grounded responses with source citations, risk categorization (Categories A, B, C, D), Human-in-the-Loop safety gates, and structured error handling (`reason_safe`).
 4. **Hardened Versioned Prompts & Security Boundaries**: Immutable prompt templates that strictly separate **trusted system instructions** from **untrusted contextual content**, escaping HTML entities and neutralizing section headers to prevent prompt injection.
-5. **Validation & Unit Testing**: 54 automated test cases covering valid, invalid, and edge-case inputs with 100% passing results.
+5. **Validation & Unit Testing**: 58 automated test cases covering valid, invalid, and edge-case inputs with 100% passing results.
 
 > **Scope Boundary Note**: This module operates in offline mock mode without paid API keys, without speech-to-text / text-to-speech hardware dependencies, and without live OS screen capturing. Third-party dependencies are strictly limited to `pydantic>=2.0,<3`.
 
@@ -704,9 +704,9 @@ src/
     mock_engine.py      # Deterministic mock reasoning & grounding
 tests/
   test_context_schemas.py  # Tests for 5 schemas and validation constraints (19 tests)
-  test_synthetic.py        # Tests for synthetic context & safety defaults (4 tests)
+  test_synthetic.py        # Tests for synthetic context & safety defaults (7 tests)
   test_mock_reasoning.py   # Tests for deterministic reasoning & safety gates (22 tests)
-  test_prompts.py          # Tests for versioning & untrusted content isolation (9 tests)
+  test_prompts.py          # Tests for versioning & untrusted content isolation (10 tests)
 web/
   index.html / style.css / app.js   # Web dashboard interface
 demo.py          # Interactive demonstration script
@@ -730,15 +730,15 @@ requirements.txt # Dependency specification (pydantic>=2.0,<3)
 
 ```powershell
 pip install -r requirements.txt
-python run_tests.py            # 54 tests, all passing
+python run_tests.py            # 58 tests, all passing
 python demo.py                 # Interactive demonstration
 python server.py               # Localhost server at http://localhost:8000
 ```
 
 ### W3 Test Results
 ```text
-SUMMARY: Ran 54 tests in 0.008s
-Passed: 54 | Failures: 0 | Errors: 0
+SUMMARY: Ran 58 tests in 0.009s
+Passed: 58 | Failures: 0 | Errors: 0
 Status: ALL TESTS PASSED [OK]
 ```
 

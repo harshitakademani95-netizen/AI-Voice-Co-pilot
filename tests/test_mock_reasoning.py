@@ -12,6 +12,7 @@ from src.context.fixtures import (
 from src.context.schemas import (
     ContextItem,
     ContextType,
+    DEFAULT_FRAME_TIMESTAMP,
     ReasoningRequest,
     RiskCategory,
 )
@@ -24,27 +25,44 @@ class TestMockReasoning(unittest.TestCase):
         self.engine = MockReasoningEngine()
 
     def test_deterministic_output(self):
-        """Identical requests must yield strictly identical results."""
-        request = ReasoningRequest(
-            request_id="req-det-1",
-            session_id="sess-det-1",
-            user_query="Why is this application failing?",
-            context_items=get_synthetic_error_scenario(),
-            prompt_version="v1.0.0",
-        )
+        """Identical requests must yield strictly identical results across all three scenarios."""
+        scenarios = [
+            ("req-det-1", "Why is this application failing?", get_synthetic_error_scenario()),
+            ("req-det-2", "Explain this research paper document", get_synthetic_document_scenario()),
+            ("req-det-3", "Move these report files to archive", get_synthetic_file_action_scenario()),
+        ]
 
-        result_1 = self.engine.reason(request)
-        result_2 = self.engine.reason(request)
+        for req_id, query, ctx in scenarios:
+            req_1 = ReasoningRequest(
+                request_id=req_id,
+                session_id=f"sess-{req_id}",
+                user_query=query,
+                context_items=ctx,
+                prompt_version="v1.0.0",
+                created_at=DEFAULT_FRAME_TIMESTAMP,
+            )
+            req_2 = ReasoningRequest(
+                request_id=req_id,
+                session_id=f"sess-{req_id}",
+                user_query=query,
+                context_items=ctx,
+                prompt_version="v1.0.0",
+                created_at=DEFAULT_FRAME_TIMESTAMP,
+            )
 
-        self.assertEqual(result_1.response_text, result_2.response_text)
-        self.assertEqual(result_1.risk_level, result_2.risk_level)
-        self.assertEqual(result_1.requires_approval, result_2.requires_approval)
-        self.assertEqual(result_1.latency_ms, result_2.latency_ms)
-        self.assertEqual(len(result_1.sources), len(result_2.sources))
-        for s1, s2 in zip(result_1.sources, result_2.sources):
-            self.assertEqual(s1.source_id, s2.source_id)
-            self.assertEqual(s1.reference_location, s2.reference_location)
-            self.assertEqual(s1.confidence_score, s2.confidence_score)
+            result_1 = self.engine.reason(req_1)
+            result_2 = self.engine.reason(req_2)
+
+            self.assertEqual(result_1.model_dump(), result_2.model_dump())
+            self.assertEqual(result_1.response_text, result_2.response_text)
+            self.assertEqual(result_1.risk_level, result_2.risk_level)
+            self.assertEqual(result_1.requires_approval, result_2.requires_approval)
+            self.assertEqual(result_1.latency_ms, result_2.latency_ms)
+            self.assertEqual(len(result_1.sources), len(result_2.sources))
+            for s1, s2 in zip(result_1.sources, result_2.sources):
+                self.assertEqual(s1.source_id, s2.source_id)
+                self.assertEqual(s1.reference_location, s2.reference_location)
+                self.assertEqual(s1.confidence_score, s2.confidence_score)
 
     def test_error_diagnostic_grounded_response(self):
         """Verify mock reasoning diagnoses ZeroDivisionError and provides ground-truth sources."""
@@ -427,6 +445,7 @@ class TestMockReasoning(unittest.TestCase):
         self.assertIn("Chocolate Chip Cookies", res.response_text)
         self.assertEqual(len(res.sources), 1)
         self.assertEqual(res.sources[0].source_id, "ctx-recipe-01")
+        # pyrefly: ignore[bad-argument-type]
         self.assertIn("Chocolate Chip Cookies", res.sources[0].excerpt)
 
     def test_dynamic_error_grounding_syntax_error_not_denominator(self):

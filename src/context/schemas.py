@@ -68,6 +68,9 @@ class SourceReference(BaseModel):
 ALLOW_REAL_FRAMES = False
 
 
+DEFAULT_FRAME_TIMESTAMP = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
 class ScreenContext(BaseModel):
     """
     Represents visual screen context captured or simulated from the user's workspace.

@@ -12,9 +12,9 @@ Description:
     - No real user files, personal data, or external camera/screen APIs are ever invoked.
 """
 
-from datetime import datetime, timezone
-from typing import List
-from src.context.schemas import ContextItem, ContextType, ScreenContext, SourceReference
+from datetime import datetime
+from typing import List, Optional
+from src.context.schemas import ContextItem, ContextType, DEFAULT_FRAME_TIMESTAMP, ScreenContext
 
 
 def create_synthetic_screen_frame(
@@ -24,6 +24,7 @@ def create_synthetic_screen_frame(
     visible_text: str = "def divide(a: float, b: float) -> float:\n    return a / b  # Line 14: ZeroDivisionError",
     width: int = 1920,
     height: int = 1080,
+    captured_at: Optional[datetime] = None,
 ) -> ScreenContext:
     """
     Generate a synthetic screen frame fixture with screen capture disabled by default.
@@ -35,6 +36,7 @@ def create_synthetic_screen_frame(
         visible_text: Synthetic OCR/screen text.
         width: Screen width in pixels.
         height: Screen height in pixels.
+        captured_at: Optional UTC timestamp (defaults to deterministic synthetic timestamp).
 
     Returns:
         Validated ScreenContext instance (capture_enabled=False, is_synthetic=True).
@@ -48,7 +50,7 @@ def create_synthetic_screen_frame(
         active_window_title=window_title,
         active_application=active_app,
         visible_text=visible_text,
-        captured_at=datetime.now(timezone.utc),
+        captured_at=captured_at if captured_at is not None else DEFAULT_FRAME_TIMESTAMP,
         metadata={"generator": "synthetic_fixtures_v1", "source": "unit_test_mock"}
     )
 
@@ -75,6 +77,7 @@ def get_synthetic_error_scenario() -> List[ContextItem]:
             "    return numerator / denominator\n"
         ),
         metadata={"language": "python", "lines": "1-3"},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     item_terminal = ContextItem(
@@ -90,6 +93,7 @@ def get_synthetic_error_scenario() -> List[ContextItem]:
             "ZeroDivisionError: division by zero"
         ),
         metadata={"exit_code": 1},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     item_screen = ContextItem(
@@ -99,6 +103,7 @@ def get_synthetic_error_scenario() -> List[ContextItem]:
         content="Active editor showing calculate_ratio with error breakpoint at line 3.",
         screen_context=screen,
         metadata={"capture_status": "disabled_default"},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     return [item_code, item_terminal, item_screen]
@@ -123,6 +128,7 @@ def get_synthetic_document_scenario() -> List[ContextItem]:
         source="nimbus_paper.pdf",
         content=doc_content,
         metadata={"page": 1, "section": "Abstract"},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     item_app = ContextItem(
@@ -131,6 +137,7 @@ def get_synthetic_document_scenario() -> List[ContextItem]:
         source="PDF Reader",
         content="Current document: nimbus_paper.pdf (Page 1 of 12). Zoom: 125%",
         metadata={"window": "PDF Reader - Nimbus Paper"},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     return [item_doc, item_app]
@@ -147,6 +154,7 @@ def get_synthetic_file_action_scenario() -> List[ContextItem]:
         source="File System",
         content="Found 3 report files: ['report_q1.pdf', 'report_q2.pdf', 'report_summary.docx']. Target folder: 'archive/2026/'.",
         metadata={"action_candidate": "move_files", "destination": "archive/2026/"},
+        timestamp=DEFAULT_FRAME_TIMESTAMP,
     )
 
     return [item_file]
