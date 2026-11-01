@@ -1,23 +1,29 @@
-# AI Voice Co-Pilot (Week 1 Foundation & Vertical Slice)
+# Academiaai AI Voicebot — SDE 3
 
+**Assigned Project:** Academiaai AI Voicebot — SDE 3  
+**Project Folder:** `projects/sde-3-voicebot/`  
+**Team Branch:** `team/sde-3-voicebot`  
 **Team:** SDE 3  
-**Status:** Integrated & Passing  
-**Architecture:** Multi-Workstream Voice Assistant System
+**Status:** 100% Integrated & 103 Unit Tests Passing  
+**Architecture:** Multi-Workstream Voice Assistant System (End-to-End Team Delivery)
 
 ---
 
 ## Executive Overview & Workstream Directory
 
-The **AI Voice Co-Pilot** is an intelligent assistant combining voice capture, speech recognition, multimodal context extraction, deterministic reasoning, agentic workflow orchestration with human-in-the-loop safety gating, and a robust session backend.
+This repository contains the complete end-to-end implementation of the **Academiaai AI Voicebot** for **Team SDE 3** per the Controlling Plan:
+- **One project per team**: Full voicebot delivered end-to-end with no external cross-team runtime dependencies.
+- **Project Folder**: Organized under `projects/sde-3-voicebot/` containing all team code, tests, configs, fixtures, and documentation.
+- **Team Branch**: Developed and published on branch `team/sde-3-voicebot`.
 
 | Workstream | Subsystem / Focus | Lead Engineer | Status | Key Artifacts |
 | :--- | :--- | :--- | :--- | :--- |
-| **W1** | Audio Capture & VAD | Harshita G Kademani | Ready | `src/audio/`, `src/schemas/audio.py` |
-| **W2** | Speech-to-Text Foundation | Disha D K | Ready | `src/voice_stt/`, `demo/live_demo.py` |
-| **W3** | Context & Reasoning Engine | Amruta A J | Ready | `src/context/`, `src/reasoning/`, `web/` |
+| **W1** | Audio & Voice Activity | Harshita G Kademani (Team Lead) | Ready | `src/audio/`, `src/schemas/audio.py`, `src/cli.py` |
+| **W2** | Speech-to-Text Pipeline | Disha D K | Ready | `src/voice_stt/`, `demo/live_demo.py` |
+| **W3** | Context, Vision & Reasoning | Amruta A J | Ready | `src/context/`, `src/reasoning/`, `web/` |
 | **W4** | Agentic Workflow Engine | Suhani A | Ready | `agentic_workflow/`, `server.py` |
-| **W5** | Backend & Sessions Layer | Vaishnavi G | Ready | `src/app.py`, `src/routes/`, `run_mock.py` |
-| **W6** | Frontend & UX | Varsha B S | Ready | `src/App.tsx`, `package.json` |
+| **W5** | Backend, Sessions & Observability | Vaishnavi G | Ready | `src/app.py`, `src/routes/`, `run_mock.py` |
+| **W6** | Frontend & User Experience | Varsha B S | Ready | `src/App.tsx`, `package.json`, `index.html` |
 
 ---
 
