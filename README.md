@@ -66,48 +66,57 @@ This module delivers the **Week 1 foundation and first vertical slice** for the 
 
 ---
 
-## 3. How to Run W1 Audio Features
+## 3. How to Run W1 Audio Features & Official CLI Command (`python -m src.cli`)
 
-### Step 1: Open the Project Folder in the Terminal
+The official entry point for the Week 1 Audio and VAD Foundation demonstration is:
+
+```powershell
+python -m src.cli
+```
+
+---
+
+### 1. What the Command Does
+The official CLI command runs an end-to-end simulation of the Week 1 Audio capture, chunking, and validation pipeline:
+- **Simulates Live Microphone Streaming**: Employs the built-in deterministic `MockMicrophone` to synthesize realistic 16-bit linear PCM audio frames. No external microphone hardware, audio drivers, or cloud services are required.
+- **Streams 1 Full Second of Audio**: Synthesizes 1.000 s of 16 kHz Mono audio, automatically partitioned by `AudioChunker` into exactly 50 consecutive chunks of 20.0 milliseconds (640 bytes) each.
+- **Displays Chunk Metadata Table**: For every generated chunk, prints a sequential row containing:
+  - **`Seq ID`**: Strictly increasing sequence identifier (`0` through `49`).
+  - **`Timestamp`**: Frame onset timestamp in seconds, strictly advancing in 20.0 ms steps (`0.000s` through `0.980s`).
+  - **`Chunk Size`**: Byte length of raw audio data (`640 B`), strictly verified against the format frame size (`channels * sample_width = 2 bytes`).
+  - **`Sample Rate`**: Sampling rate in Hertz (`16000 Hz`).
+  - **`Channels`**: Channel count (`1 (Mono)`).
+  - **`Duration`**: Chunk length in milliseconds (`20.0 ms`).
+- **Validates Timing & Monotonicity**: Verifies that timestamps and sequence IDs never drift, fluctuate, or jump out of sequence, guaranteeing downstream reliability for VAD and Speech-to-Text.
+- **Displays Stream Summary**: Emits a concluding summary confirming total chunks emitted (50), duration (1.000 s), total bytes (32,000 bytes), and completion status (`COMPLETED SUCCESSFUL (Deterministic & Validated)`).
+
+---
+
+### 2. How to Open the Project Terminal
 Before running any commands, open your terminal (PowerShell, Command Prompt, or the integrated terminal in VS Code / Antigravity IDE) and navigate to the project root directory:
 
 ```powershell
 cd "C:\Users\HARSHITA G\OneDrive\Desktop\AI Voice Bot"
 ```
 
-To confirm you are in the correct directory, check that `src/`, `tests/`, and `README.md` are listed:
+To confirm you are in the correct directory, list the directory contents and verify that `src/`, `tests/`, and `README.md` are present:
 ```powershell
 dir
 ```
 
 ---
 
-### Step 2: How to Run the Command
+### 3. How to Execute the Command
 Execute the single official CLI command from the project root directory:
 ```powershell
 python -m src.cli
 ```
 
-> **Note on Execution:** Always include `-m src.cli` from the root directory so Python executes `src/cli.py` as a module and resolves internal package imports (`src.schemas.audio`, `src.audio.mock_source`) cleanly.
+> **Note on Execution:** Always include `-m src.cli` from the root directory so Python executes `src/cli.py` as a module and resolves internal package imports (`src.schemas.audio`, `src.audio.mock_source`) cleanly without path issues.
 
 ---
 
-### Step 3: What This Command Does
-- **Simulates Live Microphone Streaming**: Employs the built-in deterministic `MockMicrophone` to synthesize realistic 16-bit linear PCM audio frames. No external microphone hardware, drivers, or cloud services are needed.
-- **Streams 1 Full Second of Audio**: Synthesizes 1.000 s of 16 kHz Mono audio, automatically partitioned by `AudioChunker` into exactly 50 consecutive chunks of 20.0 milliseconds (640 bytes) each.
-- **Displays Chunk Metadata Table**: For every generated chunk, prints a sequential row containing:
-  - **`Seq ID`**: Strictly increasing sequence identifier (`0` through `49`).
-  - **`Timestamp`**: Frame onset timestamp in seconds, strictly advancing in 20.0 ms steps (`0.000s` through `0.980s`).
-  - **`Chunk Size`**: Byte length of raw audio data (`640 B`), strictly verified against the format frame size.
-  - **`Sample Rate`**: Sampling rate in Hertz (`16000 Hz`).
-  - **`Channels`**: Channel count (`1 (Mono)`).
-  - **`Duration`**: Chunk length in milliseconds (`20.0 ms`).
-- **Validates Timing & Monotonicity**: Verifies that timestamps and sequence IDs never drift, fluctuate, or jump out of sequence, guaranteeing downstream reliability for VAD and Speech-to-Text.
-- **Displays Stream Summary**: Emits a concluding summary confirming total chunks emitted (50), duration (1.000 s), total bytes (32,000 bytes), and completion status (`COMPLETED SUCCESSFUL`).
-
----
-
-### Step 4: What Output the User Should Expect
+### 4. What Output to Expect
 When you execute `python -m src.cli`, you should expect the following terminal output:
 
 ```text
@@ -193,7 +202,7 @@ Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
 
 ---
 
-### Step 5: How to Run the Unit Tests
+### 5. How to Run Unit Tests Using the Correct Test Command
 To run the automated test discovery across the entire test suite, execute:
 
 ```powershell
@@ -216,7 +225,7 @@ An interactive browser-based visualizer dashboard with live waveform rendering i
 ```powershell
 python -m src.server
 ```
-Then navigate to [http://localhost:8000](http://localhost:8000) in your web browser.
+Then navigate to [http://localhost:8000](http://localhost:8000) (or [http://127.0.0.1:8000](http://127.0.0.1:8000)) in your web browser. The visualizer includes real-time audio waveform canvas rendering, streaming controls, chunk telemetry, and a one-click **Automated Verification Suite** button to trigger test discovery live from the browser.
 
 ---
 
