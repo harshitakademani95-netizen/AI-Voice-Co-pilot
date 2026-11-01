@@ -1,7 +1,9 @@
-# Pull Request: W1 Foundation — Typed Audio Schemas, Deterministic Mock Microphone, and CLI Demo
+# Pull Request: W1 Foundation - Typed Audio Schemas, Deterministic Mock Microphone, and CLI Demo
 
-**Branch:** `feature/w1-audio-foundation` -> `main`  
-**Workstream:** W1 – Audio and VAD  
+**Branch:** AI-Voice-Co-pilot-Version-1 -> main  
+**Pull Request URL:** [Pending PR Creation on GitHub - compare branch: AI-Voice-Co-pilot-Version-1]  
+**Repository:** https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot  
+**Workstream:** W1 - Audio and VAD  
 **Author:** Harshita G Kademani (SDE 3)  
 **Project:** AI Voice Copilot  
 **Status:** Ready for Review  
