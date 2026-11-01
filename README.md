@@ -21,6 +21,122 @@ The **AI Voice Co-Pilot** is an intelligent assistant combining voice capture, s
 
 ---
 
+# Workstream W1 – Audio and VAD Foundation
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: W1 – Audio and VAD  
+**Duration**: Day 1 – Day 7 (Week 1 – Foundation and First Vertical Slice)  
+**Test Suite**: 45 Automated Unit Tests (100% Passing)
+
+---
+
+## 1. Overview & Architecture
+
+This module delivers the **Week 1 foundation and first vertical slice** for the AI Voice Copilot audio ingestion pipeline. It adheres strictly to the System Design Document (SDD) and Product Requirements Document (PRD):
+
+- **Canonical Audio Schemas (`src/schemas/audio.py`)**: Defined once as the authoritative single source of truth for downstream VAD, STT (Whisper), and agent workflows.
+  - `AudioFormat`: Audio format configuration (sample rate in Hz, channel count, sample width in bytes, and codec encoding).
+  - `AudioChunk`: Discrete audio frame slice with monotonically increasing `sequence_id`, precise `timestamp` in seconds, raw binary PCM payload, duration calculations, defensive copying of mutable bytearrays, and lossless serialization.
+  - `AudioError`: Standardized error exception conforming to the SDD error format (`{"error": {"code": "...", "message": "...", "request_id": "...", "details": {...}}}`).
+- **Deterministic Audio Chunker (`src/audio/chunker.py`)**: Slices continuous byte streams into fixed-duration `AudioChunk`s with strict frame alignment validation and reproducible outputs.
+- **Deterministic Mock Microphone Source (`src/audio/mock_source.py`)**: Generates deterministic synthetic audio streams (16-bit linear PCM) for testing and pipeline integration without requiring physical microphone hardware.
+- **Single-Command CLI Demo (`src/cli.py`)**: Real-time or batch streaming CLI demonstrating sequential chunk generation, timing progression, and metadata output.
+- **Unit Test Suite (`tests/`)**: 45 passing unit tests covering valid paths, invalid parameters, empty chunks, corrupt unaligned payloads, sequence ordering, and schema serialization.
+
+---
+
+## 2. Canonical Audio Schemas Specification (`src/schemas/audio.py`)
+
+| Schema | Field | Type | Units | Constraints / Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `11025`, `12000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
+| | `channels` | `int` | Count | Must be `1` (mono) or `2` (stereo). Default `1`. |
+| | `sample_width`| `int` | Bytes/Sample | Must be `1`, `2`, or `4`. Default `2` (16-bit PCM). |
+| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`, `pcm_f32be`). |
+| **`AudioChunk`** | `sequence_id` | `int` | Counter | Strictly non-negative integer (`>= 0`), monotonically increasing. |
+| | `timestamp` | `float` | Seconds | Strictly non-negative, finite (`>= 0.0`, rejects NaN/inf), advancing by chunk duration. |
+| | `data` | `bytes` | Raw PCM | Non-empty binary bytes (bytearray input is defensively copied); byte length must be exact multiple of `format.frame_size`. |
+| | `format` | `AudioFormat` | Contract | Valid `AudioFormat` instance. |
+| | `metadata` | `dict` | Key/Value | Optional contextual metadata. |
+| **`AudioError`** | `message` | `str` | Text | Human-readable explanation of error. |
+| | `code` | `str` | Code | Standardized machine-readable error code (`INVALID_SAMPLE_RATE`, `EMPTY_CHUNK_DATA`, `CORRUPT_CHUNK_DATA`, `INVALID_ENCODING`, etc.). |
+| | `request_id` | `str` | Tracking ID | Optional correlation tracking ID per Doc 04 section 5. |
+| | `details` | `dict` | Key/Value | Contextual debugging dictionary. |
+
+---
+
+## 3. How to Run W1 Audio Features
+
+### Official CLI Demonstration Command
+Run the single official command from the root of the project:
+```powershell
+python -m src.cli
+```
+
+#### What this command does:
+- **Simulates microphone streaming**: Uses the built-in deterministic `MockMicrophone` to generate synthetic audio chunks without requiring a physical microphone.
+- **Streams 1 full second of audio**: Generates 16 kHz mono 16-bit linear PCM audio sliced into 50 consecutive chunks of 20 milliseconds each.
+- **Displays chunk metadata**: Prints each chunk's sequence ID, start timestamp in seconds, chunk byte size (640 bytes), sample rate, channels, and duration.
+- **Verifies pipeline reliability**: Validates that all chunks are emitted strictly sequentially with advancing timestamps and valid frame boundaries.
+
+#### Expected Output:
+```text
+======================================================================================
+AI Voice Copilot - Audio Pipeline Demonstration (W1)
+Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
+(Simulated mock microphone source; no physical microphone hardware required)
+======================================================================================
+
+[Configuration]
+  * Sample Rate    : 16000 Hz
+  * Channels       : 1 (Mono)
+  * Bit Depth      : 16-bit PCM (pcm_s16le)
+  * Frame Size     : 2 bytes
+  * Chunk Duration : 20.0 ms
+  * Stream Duration: 1.0 s 
+  * Tone Frequency : 440.0 Hz
+  * Mode           : Fast deterministic batch
+
+[Streaming AudioChunks]
+-------------------------------------------------------------------------------
+  Seq ID |   Timestamp |   Chunk Size |   Sample Rate |   Channels |   Duration
+-------------------------------------------------------------------------------
+       0 |      0.000s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       1 |      0.020s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       2 |      0.040s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       ...
+      48 |      0.960s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      49 |      0.980s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+-------------------------------------------------------------------------------
+
+[Stream Summary]
+  * Total Chunks Emitted: 50
+  * Total Audio Duration: 1.000 s (1000.0 ms)
+  * Total Bytes Streamed: 32000 bytes
+  * Stream Status       : COMPLETED SUCCESSFUL (Deterministic & Validated)
+======================================================================================
+```
+
+### Running the Unit Tests
+Execute the comprehensive test suite with Python's built-in `unittest` runner:
+```powershell
+python -m unittest tests/test_audio_schemas.py tests/test_audio_errors.py tests/test_chunker.py tests/test_mock_source.py -v
+```
+Or run the entire consolidated repository test suite:
+```powershell
+python -m unittest discover tests -v
+```
+All 45 W1 tests pass without external dependencies.
+
+### Optional FastAPI Web Visualizer
+```powershell
+python -m src.server
+```
+Navigate to [http://localhost:8000](http://localhost:8000) for real-time waveform visualization.
+
+---
+
 ## Unified Execution & Quickstart Guide
 
 ### 1. Interactive Multi-Workstream Demonstration
