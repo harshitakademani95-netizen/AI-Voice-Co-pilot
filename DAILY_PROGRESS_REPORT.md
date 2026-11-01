@@ -154,10 +154,10 @@
   - `DAILY_PROGRESS_REPORT.md`
 - **Tests run (command + result):**
   - `python -m unittest discover tests -v` -> 45/45 tests passed (OK).
-  - `python -m src.cli --duration 0.1` -> Output verified and completed cleanly.
+  - python -m src.cli -> Output verified and completed cleanly.
 - **GitHub branch / PR link:**
-  - Branch: `feature/w1-audio-foundation`
-  - Pull Request: Ready for review to merge `feature/w1-audio-foundation` into `main`.
+  - Branch: AI-Voice-Co-pilot-Version-1 (https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot/tree/AI-Voice-Co-pilot-Version-1)
+  - Pull Request URL: [Pending PR Creation on GitHub - compare branch: AI-Voice-Co-pilot-Version-1]
 - **Blockers:**
   - None. Week 1 deliverables complete and ready for W2 integration.
 - **Next steps:**

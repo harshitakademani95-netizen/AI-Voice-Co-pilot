@@ -21,6 +21,214 @@ The **AI Voice Co-Pilot** is an intelligent assistant combining voice capture, s
 
 ---
 
+# Workstream W1 – Audio and VAD Foundation
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: W1 – Audio and VAD  
+**Duration**: Day 1 – Day 7 (Week 1 – Foundation and First Vertical Slice)  
+**Test Suite**: 45 Automated Unit Tests (100% Passing)
+
+---
+
+## 1. Overview & Architecture
+
+This module delivers the **Week 1 foundation and first vertical slice** for the AI Voice Copilot audio ingestion pipeline. It adheres strictly to the System Design Document (SDD) and Product Requirements Document (PRD):
+
+- **Canonical Audio Schemas (`src/schemas/audio.py`)**: Defined once as the authoritative single source of truth for downstream VAD, STT (Whisper), and agent workflows.
+  - `AudioFormat`: Audio format configuration (sample rate in Hz, channel count, sample width in bytes, and codec encoding).
+  - `AudioChunk`: Discrete audio frame slice with monotonically increasing `sequence_id`, precise `timestamp` in seconds, raw binary PCM payload, duration calculations, defensive copying of mutable bytearrays, and lossless serialization.
+  - `AudioError`: Standardized error exception conforming to the SDD error format (`{"error": {"code": "...", "message": "...", "request_id": "...", "details": {...}}}`).
+- **Deterministic Audio Chunker (`src/audio/chunker.py`)**: Slices continuous byte streams into fixed-duration `AudioChunk`s with strict frame alignment validation and reproducible outputs.
+- **Deterministic Mock Microphone Source (`src/audio/mock_source.py`)**: Generates deterministic synthetic audio streams (16-bit linear PCM) for testing and pipeline integration without requiring physical microphone hardware.
+- **Single-Command CLI Demo (`src/cli.py`)**: Real-time or batch streaming CLI demonstrating sequential chunk generation, timing progression, and metadata output.
+- **Unit Test Suite (`tests/`)**: 45 passing unit tests covering valid paths, invalid parameters, empty chunks, corrupt unaligned payloads, sequence ordering, and schema serialization.
+
+---
+
+## 2. Canonical Audio Schemas Specification (`src/schemas/audio.py`)
+
+| Schema | Field | Type | Units | Constraints / Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `11025`, `12000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
+| | `channels` | `int` | Count | Must be `1` (mono) or `2` (stereo). Default `1`. |
+| | `sample_width`| `int` | Bytes/Sample | Must be `1`, `2`, or `4`. Default `2` (16-bit PCM). |
+| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`, `pcm_f32be`). |
+| **`AudioChunk`** | `sequence_id` | `int` | Counter | Strictly non-negative integer (`>= 0`), monotonically increasing. |
+| | `timestamp` | `float` | Seconds | Strictly non-negative, finite (`>= 0.0`, rejects NaN/inf), advancing by chunk duration. |
+| | `data` | `bytes` | Raw PCM | Non-empty binary bytes (bytearray input is defensively copied); byte length must be exact multiple of `format.frame_size`. |
+| | `format` | `AudioFormat` | Contract | Valid `AudioFormat` instance. |
+| | `metadata` | `dict` | Key/Value | Optional contextual metadata. |
+| **`AudioError`** | `message` | `str` | Text | Human-readable explanation of error. |
+| | `code` | `str` | Code | Standardized machine-readable error code (`INVALID_SAMPLE_RATE`, `EMPTY_CHUNK_DATA`, `CORRUPT_CHUNK_DATA`, `INVALID_ENCODING`, etc.). |
+| | `request_id` | `str` | Tracking ID | Optional correlation tracking ID per Doc 04 section 5. |
+| | `details` | `dict` | Key/Value | Contextual debugging dictionary. |
+
+---
+
+## 3. How to Run W1 Audio Features & Official CLI Command (`python -m src.cli`)
+
+The official entry point for the Week 1 Audio and VAD Foundation demonstration is:
+
+```powershell
+python -m src.cli
+```
+
+---
+
+### 1. What the Command Does
+The official CLI command runs an end-to-end simulation of the Week 1 Audio capture, chunking, and validation pipeline:
+- **Simulates Live Microphone Streaming**: Employs the built-in deterministic `MockMicrophone` to synthesize realistic 16-bit linear PCM audio frames. No external microphone hardware, audio drivers, or cloud services are required.
+- **Streams 1 Full Second of Audio**: Synthesizes 1.000 s of 16 kHz Mono audio, automatically partitioned by `AudioChunker` into exactly 50 consecutive chunks of 20.0 milliseconds (640 bytes) each.
+- **Displays Chunk Metadata Table**: For every generated chunk, prints a sequential row containing:
+  - **`Seq ID`**: Strictly increasing sequence identifier (`0` through `49`).
+  - **`Timestamp`**: Frame onset timestamp in seconds, strictly advancing in 20.0 ms steps (`0.000s` through `0.980s`).
+  - **`Chunk Size`**: Byte length of raw audio data (`640 B`), strictly verified against the format frame size (`channels * sample_width = 2 bytes`).
+  - **`Sample Rate`**: Sampling rate in Hertz (`16000 Hz`).
+  - **`Channels`**: Channel count (`1 (Mono)`).
+  - **`Duration`**: Chunk length in milliseconds (`20.0 ms`).
+- **Validates Timing & Monotonicity**: Verifies that timestamps and sequence IDs never drift, fluctuate, or jump out of sequence, guaranteeing downstream reliability for VAD and Speech-to-Text.
+- **Displays Stream Summary**: Emits a concluding summary confirming total chunks emitted (50), duration (1.000 s), total bytes (32,000 bytes), and completion status (`COMPLETED SUCCESSFUL (Deterministic & Validated)`).
+
+---
+
+### 2. How to Open the Project Terminal
+Before running any commands, open your terminal (PowerShell, Command Prompt, or the integrated terminal in VS Code / Antigravity IDE) and navigate to the project root directory:
+
+```powershell
+cd "C:\Users\HARSHITA G\OneDrive\Desktop\AI Voice Bot"
+```
+
+To confirm you are in the correct directory, list the directory contents and verify that `src/`, `tests/`, and `README.md` are present:
+```powershell
+dir
+```
+
+---
+
+### 3. How to Execute the Command
+Execute the single official CLI command from the project root directory:
+```powershell
+python -m src.cli
+```
+
+> **Note on Execution:** Always include `-m src.cli` from the root directory so Python executes `src/cli.py` as a module and resolves internal package imports (`src.schemas.audio`, `src.audio.mock_source`) cleanly without path issues.
+
+---
+
+### 4. What Output to Expect
+When you execute `python -m src.cli`, you should expect the following terminal output:
+
+```text
+======================================================================================
+AI Voice Copilot - Audio Pipeline Demonstration (W1)
+Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
+(Simulated mock microphone source; no physical microphone hardware required)
+======================================================================================
+
+[Configuration]
+  * Sample Rate    : 16000 Hz
+  * Channels       : 1 (Mono)
+  * Bit Depth      : 16-bit PCM (pcm_s16le)
+  * Frame Size     : 2 bytes
+  * Chunk Duration : 20.0 ms
+  * Stream Duration: 1.0 s 
+  * Tone Frequency : 440.0 Hz
+  * Mode           : Fast deterministic batch
+
+[Streaming AudioChunks]
+-------------------------------------------------------------------------------
+  Seq ID |   Timestamp |   Chunk Size |   Sample Rate |   Channels |   Duration
+-------------------------------------------------------------------------------
+       0 |      0.000s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       1 |      0.020s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       2 |      0.040s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       3 |      0.060s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       4 |      0.080s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       5 |      0.100s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       6 |      0.120s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       7 |      0.140s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       8 |      0.160s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       9 |      0.180s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      10 |      0.200s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      11 |      0.220s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      12 |      0.240s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      13 |      0.260s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      14 |      0.280s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      15 |      0.300s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      16 |      0.320s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      17 |      0.340s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      18 |      0.360s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      19 |      0.380s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      20 |      0.400s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      21 |      0.420s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      22 |      0.440s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      23 |      0.460s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      24 |      0.480s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      25 |      0.500s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      26 |      0.520s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      27 |      0.540s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      28 |      0.560s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      29 |      0.580s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      30 |      0.600s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      31 |      0.620s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      32 |      0.640s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      33 |      0.660s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      34 |      0.680s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      35 |      0.700s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      36 |      0.720s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      37 |      0.740s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      38 |      0.760s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      39 |      0.780s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      40 |      0.800s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      41 |      0.820s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      42 |      0.840s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      43 |      0.860s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      44 |      0.880s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      45 |      0.900s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      46 |      0.920s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      47 |      0.940s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      48 |      0.960s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      49 |      0.980s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+-------------------------------------------------------------------------------
+
+[Stream Summary]
+  * Total Chunks Emitted: 50
+  * Total Audio Duration: 1.000 s (1000.0 ms)
+  * Total Bytes Streamed: 32000 bytes
+  * Stream Status       : COMPLETED SUCCESSFUL (Deterministic & Validated)
+======================================================================================
+```
+
+---
+
+### 5. How to Run Unit Tests Using the Correct Test Command
+To run the automated test discovery across the entire test suite, execute:
+
+```powershell
+python -m unittest discover tests -v
+```
+
+#### What this test command validates:
+- **Zero Third-Party Dependencies Required**: Uses Python's built-in standard library `unittest` test discovery.
+- **Audio Schemas**: Validates all boundary constraints on `AudioFormat` (supported sample rates 8k–96k Hz, channel count 1 or 2, sample width 1, 2, or 4 bytes, encodings) and `AudioChunk` (monotonically increasing sequence IDs, finite timestamps, defensive copies of `bytearray`).
+- **Robust Error Handling**: Tests rejection of invalid rates, invalid channel counts, empty chunks (`EMPTY_CHUNK_DATA`), and corrupt unaligned payloads (`CORRUPT_CHUNK_DATA`).
+- **Deterministic Chunker & Sequence Ordering**: Verifies deterministic chunk slicing and sequence validation (`AudioChunker.validate_sequence`).
+- **Mock Microphone**: Verifies multi-byte width sample synthesis (8-bit, 16-bit, 32-bit), safe default 1.0s duration, overshoot protection, and reproducible stream replay.
+
+*(To run exclusively the 45 Week 1 Audio and VAD tests, you can also run: `python -m unittest tests/test_audio_schemas.py tests/test_audio_errors.py tests/test_chunker.py tests/test_mock_source.py -v`)*
+
+---
+
+### Optional FastAPI Web Visualizer
+An interactive browser-based visualizer dashboard with live waveform rendering is also available:
+```powershell
+python -m src.server
+```
+Then navigate to [http://localhost:8000](http://localhost:8000) (or [http://127.0.0.1:8000](http://127.0.0.1:8000)) in your web browser. The visualizer includes real-time audio waveform canvas rendering, streaming controls, chunk telemetry, and a one-click **Automated Verification Suite** button to trigger test discovery live from the browser.
+
+---
+
 ## Unified Execution & Quickstart Guide
 
 ### 1. Interactive Multi-Workstream Demonstration
@@ -30,6 +238,7 @@ python demo.py
 ```
 Or run a specific workstream:
 ```powershell
+python -m src.cli                   # Audio Ingestion & VAD demo (W1)
 python demo.py --workstream w4      # Agentic Workflow demo
 python demo.py --workstream w3      # Context & Reasoning demo
 python scripts/demo_day7.py         # Backend & Sessions demo (W5)

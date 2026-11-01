@@ -129,7 +129,7 @@
         <div class="subtitle">Team: SDE 3 | Student: Harshita G Kademani | Workstream: W1 (Audio & VAD)</div>
       </div>
       <div>
-        <button id="runTestsBtn" class="btn btn-success" type="button">Run 30 Unit Tests</button>
+        <button id="runTestsBtn" class="btn btn-success" type="button">Run Automated Unit Tests</button>
       </div>
     </header>
 
@@ -169,16 +169,16 @@
 
       <!-- Unit Test Runner & Verification -->
       <div class="card">
-        <div class="card-title">Automated Verification Suite (30 Tests)</div>
+        <div class="card-title">Automated Verification Suite (<span id="headingTestCount">103</span> Tests)</div>
         <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
           <div id="testBadge" class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">
             Status: <span id="testStatus">Ready to Run</span>
           </div>
           <div class="badge" style="background: rgba(255, 255, 255, 0.05); color: #94a3b8; border-color: rgba(255, 255, 255, 0.1);">
-            <span id="testSummary">30 Total Tests</span>
+            <span id="testSummary">103 Total Tests</span>
           </div>
         </div>
-        <div class="test-log" id="testLog">Click "Run 30 Unit Tests" above to execute tests for:
+        <div class="test-log" id="testLog">Click "Run Automated Unit Tests" above to execute tests across the test suite:
 * AudioChunk, AudioFormat, AudioError schemas
 * Invalid sample rates and channels validation
 * Empty chunk rejection (EMPTY_CHUNK_DATA)
@@ -334,7 +334,7 @@
         const runBtn = document.getElementById('runTestsBtn');
 
         if (runBtn) runBtn.disabled = true;
-        if (status) status.textContent = 'Running 30 tests...';
+        if (status) status.textContent = 'Running test suite...';
         if (log) log.textContent = 'Executing python -m unittest discover tests -v ...\n';
 
         try {
@@ -350,6 +350,11 @@
 
           if (summary) {
             summary.textContent = res.tests_run + ' Total | ' + passed + ' Passed | ' + res.failures + ' Failed | ' + res.errors + ' Errors';
+          }
+
+          const headingCount = document.getElementById('headingTestCount');
+          if (headingCount) {
+            headingCount.textContent = res.tests_run;
           }
 
           if (badge) {
