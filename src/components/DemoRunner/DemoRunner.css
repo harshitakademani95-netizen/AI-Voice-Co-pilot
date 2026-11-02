@@ -1,0 +1,87 @@
+.demo-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.demo-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.demo-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.demo-scenario-select {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  width: 100%;
+}
+
+.demo-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-demo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.btn-demo-primary {
+  background: #6366f1;
+  color: white;
+}
+
+.btn-demo-primary:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.btn-demo-secondary {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+}
+
+.btn-demo-secondary:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+.demo-progress-bar {
+  height: 4px;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.demo-progress-fill {
+  height: 100%;
+  background: #6366f1;
+  transition: width 0.3s ease;
+}
