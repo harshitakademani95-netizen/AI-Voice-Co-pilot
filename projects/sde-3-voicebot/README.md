@@ -1,0 +1,1201 @@
+# Academiaai AI Voicebot — SDE 3
+
+**Assigned Project:** Academiaai AI Voicebot — SDE 3  
+**Project Folder:** `projects/sde-3-voicebot/`  
+**Team Branch:** `team/sde-3-voicebot`  
+**Team:** SDE 3  
+**Status:** 100% Integrated & 103 Unit Tests Passing  
+**Architecture:** Multi-Workstream Voice Assistant System (End-to-End Team Delivery)
+
+---
+
+## Executive Overview & Workstream Directory
+
+This repository contains the complete end-to-end implementation of the **Academiaai AI Voicebot** for **Team SDE 3** per the Controlling Plan:
+- **One project per team**: Full voicebot delivered end-to-end with no external cross-team runtime dependencies.
+- **Project Folder**: Organized under `projects/sde-3-voicebot/` containing all team code, tests, configs, fixtures, and documentation.
+- **Team Branch**: Developed and published on branch `team/sde-3-voicebot`.
+
+| Workstream | Subsystem / Focus | Lead Engineer | Status | Key Artifacts |
+| :--- | :--- | :--- | :--- | :--- |
+| **W1** | Audio & Voice Activity | Harshita G Kademani (Team Lead) | Ready | `src/audio/`, `src/schemas/audio.py`, `src/cli.py` |
+| **W2** | Speech-to-Text Pipeline | Disha D K | Ready | `src/voice_stt/`, `demo/live_demo.py` |
+| **W3** | Context, Vision & Reasoning | Amruta A J | Ready | `src/context/`, `src/reasoning/`, `web/` |
+| **W4** | Agentic Workflow Engine | Suhani A | Ready | `agentic_workflow/`, `server.py` |
+| **W5** | Backend, Sessions & Observability | Vaishnavi G | Ready | `src/app.py`, `src/routes/`, `run_mock.py` |
+| **W6** | Frontend & User Experience | Varsha B S | Ready | `src/App.tsx`, `package.json`, `index.html` |
+
+---
+
+# Workstream W1 – Audio and VAD Foundation
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: W1 – Audio and VAD  
+**Duration**: Day 1 – Day 7 (Week 1 – Foundation and First Vertical Slice)  
+**Test Suite**: 45 Automated Unit Tests (100% Passing)
+
+---
+
+## 1. Overview & Architecture
+
+This module delivers the **Week 1 foundation and first vertical slice** for the AI Voice Copilot audio ingestion pipeline. It adheres strictly to the System Design Document (SDD) and Product Requirements Document (PRD):
+
+- **Canonical Audio Schemas (`src/schemas/audio.py`)**: Defined once as the authoritative single source of truth for downstream VAD, STT (Whisper), and agent workflows.
+  - `AudioFormat`: Audio format configuration (sample rate in Hz, channel count, sample width in bytes, and codec encoding).
+  - `AudioChunk`: Discrete audio frame slice with monotonically increasing `sequence_id`, precise `timestamp` in seconds, raw binary PCM payload, duration calculations, defensive copying of mutable bytearrays, and lossless serialization.
+  - `AudioError`: Standardized error exception conforming to the SDD error format (`{"error": {"code": "...", "message": "...", "request_id": "...", "details": {...}}}`).
+- **Deterministic Audio Chunker (`src/audio/chunker.py`)**: Slices continuous byte streams into fixed-duration `AudioChunk`s with strict frame alignment validation and reproducible outputs.
+- **Deterministic Mock Microphone Source (`src/audio/mock_source.py`)**: Generates deterministic synthetic audio streams (16-bit linear PCM) for testing and pipeline integration without requiring physical microphone hardware.
+- **Single-Command CLI Demo (`src/cli.py`)**: Real-time or batch streaming CLI demonstrating sequential chunk generation, timing progression, and metadata output.
+- **Unit Test Suite (`tests/`)**: 45 passing unit tests covering valid paths, invalid parameters, empty chunks, corrupt unaligned payloads, sequence ordering, and schema serialization.
+
+---
+
+## 2. Canonical Audio Schemas Specification (`src/schemas/audio.py`)
+
+| Schema | Field | Type | Units | Constraints / Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **`AudioFormat`** | `sample_rate` | `int` | Hz | Must be in supported list (`8000`, `11025`, `12000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`, `96000`). Default `16000`. |
+| | `channels` | `int` | Count | Must be `1` (mono) or `2` (stereo). Default `1`. |
+| | `sample_width`| `int` | Bytes/Sample | Must be `1`, `2`, or `4`. Default `2` (16-bit PCM). |
+| | `encoding` | `str` | Codec ID | Supported codec compatible with sample width (`pcm_u8`, `pcm_s8`, `pcm_s16le`, `pcm_s16be`, `pcm_s32le`, `pcm_s32be`, `pcm_f32le`, `pcm_f32be`). |
+| **`AudioChunk`** | `sequence_id` | `int` | Counter | Strictly non-negative integer (`>= 0`), monotonically increasing. |
+| | `timestamp` | `float` | Seconds | Strictly non-negative, finite (`>= 0.0`, rejects NaN/inf), advancing by chunk duration. |
+| | `data` | `bytes` | Raw PCM | Non-empty binary bytes (bytearray input is defensively copied); byte length must be exact multiple of `format.frame_size`. |
+| | `format` | `AudioFormat` | Contract | Valid `AudioFormat` instance. |
+| | `metadata` | `dict` | Key/Value | Optional contextual metadata. |
+| **`AudioError`** | `message` | `str` | Text | Human-readable explanation of error. |
+| | `code` | `str` | Code | Standardized machine-readable error code (`INVALID_SAMPLE_RATE`, `EMPTY_CHUNK_DATA`, `CORRUPT_CHUNK_DATA`, `INVALID_ENCODING`, etc.). |
+| | `request_id` | `str` | Tracking ID | Optional correlation tracking ID per Doc 04 section 5. |
+| | `details` | `dict` | Key/Value | Contextual debugging dictionary. |
+
+---
+
+## 3. How to Run W1 Audio Features & Official CLI Command (`python -m src.cli`)
+
+The official entry point for the Week 1 Audio and VAD Foundation demonstration is:
+
+```powershell
+python -m src.cli
+```
+
+---
+
+### 1. What the Command Does
+The official CLI command runs an end-to-end simulation of the Week 1 Audio capture, chunking, and validation pipeline:
+- **Simulates Live Microphone Streaming**: Employs the built-in deterministic `MockMicrophone` to synthesize realistic 16-bit linear PCM audio frames. No external microphone hardware, audio drivers, or cloud services are required.
+- **Streams 1 Full Second of Audio**: Synthesizes 1.000 s of 16 kHz Mono audio, automatically partitioned by `AudioChunker` into exactly 50 consecutive chunks of 20.0 milliseconds (640 bytes) each.
+- **Displays Chunk Metadata Table**: For every generated chunk, prints a sequential row containing:
+  - **`Seq ID`**: Strictly increasing sequence identifier (`0` through `49`).
+  - **`Timestamp`**: Frame onset timestamp in seconds, strictly advancing in 20.0 ms steps (`0.000s` through `0.980s`).
+  - **`Chunk Size`**: Byte length of raw audio data (`640 B`), strictly verified against the format frame size (`channels * sample_width = 2 bytes`).
+  - **`Sample Rate`**: Sampling rate in Hertz (`16000 Hz`).
+  - **`Channels`**: Channel count (`1 (Mono)`).
+  - **`Duration`**: Chunk length in milliseconds (`20.0 ms`).
+- **Validates Timing & Monotonicity**: Verifies that timestamps and sequence IDs never drift, fluctuate, or jump out of sequence, guaranteeing downstream reliability for VAD and Speech-to-Text.
+- **Displays Stream Summary**: Emits a concluding summary confirming total chunks emitted (50), duration (1.000 s), total bytes (32,000 bytes), and completion status (`COMPLETED SUCCESSFUL (Deterministic & Validated)`).
+
+---
+
+### 2. How to Open the Project Terminal
+Before running any commands, open your terminal (PowerShell, Command Prompt, or the integrated terminal in VS Code / Antigravity IDE) and navigate to the project root directory:
+
+```powershell
+cd "C:\Users\HARSHITA G\OneDrive\Desktop\AI Voice Bot"
+```
+
+To confirm you are in the correct directory, list the directory contents and verify that `src/`, `tests/`, and `README.md` are present:
+```powershell
+dir
+```
+
+---
+
+### 3. How to Execute the Command
+Execute the single official CLI command from the project root directory:
+```powershell
+python -m src.cli
+```
+
+> **Note on Execution:** Always include `-m src.cli` from the root directory so Python executes `src/cli.py` as a module and resolves internal package imports (`src.schemas.audio`, `src.audio.mock_source`) cleanly without path issues.
+
+---
+
+### 4. What Output to Expect
+When you execute `python -m src.cli`, you should expect the following terminal output:
+
+```text
+======================================================================================
+AI Voice Copilot - Audio Pipeline Demonstration (W1)
+Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
+(Simulated mock microphone source; no physical microphone hardware required)
+======================================================================================
+
+[Configuration]
+  * Sample Rate    : 16000 Hz
+  * Channels       : 1 (Mono)
+  * Bit Depth      : 16-bit PCM (pcm_s16le)
+  * Frame Size     : 2 bytes
+  * Chunk Duration : 20.0 ms
+  * Stream Duration: 1.0 s 
+  * Tone Frequency : 440.0 Hz
+  * Mode           : Fast deterministic batch
+
+[Streaming AudioChunks]
+-------------------------------------------------------------------------------
+  Seq ID |   Timestamp |   Chunk Size |   Sample Rate |   Channels |   Duration
+-------------------------------------------------------------------------------
+       0 |      0.000s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       1 |      0.020s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       2 |      0.040s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       3 |      0.060s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       4 |      0.080s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       5 |      0.100s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       6 |      0.120s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       7 |      0.140s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       8 |      0.160s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+       9 |      0.180s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      10 |      0.200s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      11 |      0.220s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      12 |      0.240s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      13 |      0.260s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      14 |      0.280s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      15 |      0.300s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      16 |      0.320s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      17 |      0.340s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      18 |      0.360s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      19 |      0.380s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      20 |      0.400s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      21 |      0.420s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      22 |      0.440s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      23 |      0.460s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      24 |      0.480s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      25 |      0.500s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      26 |      0.520s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      27 |      0.540s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      28 |      0.560s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      29 |      0.580s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      30 |      0.600s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      31 |      0.620s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      32 |      0.640s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      33 |      0.660s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      34 |      0.680s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      35 |      0.700s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      36 |      0.720s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      37 |      0.740s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      38 |      0.760s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      39 |      0.780s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      40 |      0.800s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      41 |      0.820s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      42 |      0.840s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      43 |      0.860s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      44 |      0.880s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      45 |      0.900s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      46 |      0.920s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      47 |      0.940s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      48 |      0.960s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+      49 |      0.980s |        640 B |      16000 Hz |   1 (Mono) |    20.0 ms
+-------------------------------------------------------------------------------
+
+[Stream Summary]
+  * Total Chunks Emitted: 50
+  * Total Audio Duration: 1.000 s (1000.0 ms)
+  * Total Bytes Streamed: 32000 bytes
+  * Stream Status       : COMPLETED SUCCESSFUL (Deterministic & Validated)
+======================================================================================
+```
+
+---
+
+### 5. How to Run Unit Tests Using the Correct Test Command
+To run the automated test discovery across the entire test suite, execute:
+
+```powershell
+python -m unittest discover tests -v
+```
+
+#### What this test command validates:
+- **Zero Third-Party Dependencies Required**: Uses Python's built-in standard library `unittest` test discovery.
+- **Audio Schemas**: Validates all boundary constraints on `AudioFormat` (supported sample rates 8k–96k Hz, channel count 1 or 2, sample width 1, 2, or 4 bytes, encodings) and `AudioChunk` (monotonically increasing sequence IDs, finite timestamps, defensive copies of `bytearray`).
+- **Robust Error Handling**: Tests rejection of invalid rates, invalid channel counts, empty chunks (`EMPTY_CHUNK_DATA`), and corrupt unaligned payloads (`CORRUPT_CHUNK_DATA`).
+- **Deterministic Chunker & Sequence Ordering**: Verifies deterministic chunk slicing and sequence validation (`AudioChunker.validate_sequence`).
+- **Mock Microphone**: Verifies multi-byte width sample synthesis (8-bit, 16-bit, 32-bit), safe default 1.0s duration, overshoot protection, and reproducible stream replay.
+
+*(To run exclusively the 45 Week 1 Audio and VAD tests, you can also run: `python -m unittest tests/test_audio_schemas.py tests/test_audio_errors.py tests/test_chunker.py tests/test_mock_source.py -v`)*
+
+---
+
+---
+
+# Workstream W1/W2 – Audio Pipeline, Lifecycle, VAD & Buffer (Week 2, D8–D14)
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: W1/W2 – Audio Capture, Device Adapter, Lifecycle, VAD & Bounded Buffer  
+**Duration**: Day 8 – Day 14 (Week 2 – Advanced Ingestion & Pipeline Orchestration)  
+**Total Audio Test Suite**: 125 Passing Audio Tests (45 Week 1 + 80 Week 2) | **Total Repository Suite**: 183 Tests (100% Passing)
+
+---
+
+## 1. Week 1 vs Week 2 Architecture Evolution
+
+Week 2 builds directly upon the authoritative foundational schemas established in Week 1 without duplication:
+- **Canonical Schema Re-use (`src/schemas/audio.py`)**: `AudioFormat`, `AudioChunk`, and `AudioError` remain the single source of truth across all modules.
+- **Layered Architecture**:
+  1. **Hardware / Device Abstraction Layer (`src/audio/device.py`, D8–D9)**: Decouples physical/virtual devices from ingestion code. Provides permission lifecycle (`UNKNOWN`, `REQUESTED`, `GRANTED`, `DENIED`, `UNSUPPORTED`), device inventory, and hardware error simulation.
+  2. **Lifecycle Controller (`src/audio/lifecycle.py`, D10–D11)**: Governs state transitions across `IDLE`, `STARTING`, `RUNNING`, `PAUSED`, `STOPPING`, `STOPPED`, and `ERROR`. Enforces safety preconditions (device selected and permission `GRANTED`) before starting.
+  3. **Voice Activity Detection (`src/audio/vad.py`, D10–D11)**: Rule-based RMS energy detection evaluating speech confidence, rejecting short noise bursts (< 60ms), and applying hang-over debounce for natural pauses.
+  4. **Bounded Audio Stream Buffer (`src/audio/buffer.py`, D12–D13)**: Strict capacity bounds with an explicit overflow/backpressure policy (drops incoming chunks when full, records cumulative drop counter, never silently discards). Tracks monotonic sequence gaps, late chunks, and duplicates.
+  5. **Integrated Pipeline Orchestrator (`src/audio/pipeline.py`, D14)**: Connects all subsystems into a unified `process_step()` streaming loop with deterministic synthetic audio fixtures.
+
+---
+
+## 2. Component Specifications
+
+### A. Device Adapter & Permissions (`src/audio/device.py`, D8–D9)
+- **`AudioPermissionState`**: `UNKNOWN`, `REQUESTED`, `GRANTED`, `DENIED`, `UNSUPPORTED`. Supports observable `REQUESTED` state via pending callbacks and two-step resolution (`resolve_permission`).
+- **`AudioDeviceInfo`**: Validated metadata (`device_id`, `name`, `channels`, `sample_rate`, `is_default`, `is_mock`, `supported`). Only rejects device selection when `supported=False` (`UNSUPPORTED_DEVICE`).
+- **Format Validation on Open**: `open()` strictly validates format compatibility (`channels` and `sample_rate`) between active `AudioFormat` and selected device (`INVALID_CHANNELS`, `INVALID_SAMPLE_RATE`).
+- **Device Switching Lock**: Refuses device switching while stream is open (`DEVICE_BUSY`).
+- **Continuous Permission Enforcement**: Every `read_chunk()` call verifies `AudioPermissionState.GRANTED`. Revocation immediately closes hardware and raises `PERMISSION_DENIED`.
+
+### B. Audio Lifecycle Controller (`src/audio/lifecycle.py`, D10–D11)
+- **Lifecycle States**:
+  - `IDLE`: Initial quiescent state.
+  - `STARTING`: Verifying device selection & permission, opening hardware.
+  - `RUNNING`: Actively streaming and emitting chunks.
+  - `PAUSED`: Temporarily suspended without dropping session state.
+  - `STOPPING`: Purging resources and closing device.
+  - `STOPPED`: Clean terminal state (idempotent stop).
+  - `ERROR`: Captures fatal errors and hardware faults safely.
+- **Strict Transition Rules**:
+  - `IDLE -> STARTING -> RUNNING`
+  - `RUNNING <-> PAUSED`
+  - `RUNNING / PAUSED -> STOPPING -> STOPPED`
+  - Rejects invalid transitions with `ILLEGAL_LIFECYCLE_TRANSITION`.
+- **Restart Policy**:
+  - Restart is supported from `STOPPED` or `ERROR`.
+  - When restarting, `AudioLifecycleController.start()` resets internal sequence IDs to -1, timestamps to -1.0, and captured chunk counters to 0, preventing `OUT_OF_ORDER_CHUNK` exceptions on restarted devices.
+  - Can be explicitly disabled via `allow_restart_from_stopped=False`.
+- **Stream Termination & Out-of-Order Handling**:
+  - Exposes `is_end_of_stream` property transitioning to `True` when device returns `None`.
+  - If device emits a non-monotonic chunk, controller immediately transitions to `ERROR`, records `last_error`, closes the device, and raises `OUT_OF_ORDER_CHUNK`.
+
+### C. Voice Activity Detection (`src/audio/vad.py`, D10–D11)
+- **Classification Events (`VADEventType`)**: `SPEECH_START`, `SPEECH_ONGOING`, `SPEECH_END`, `SILENCE`.
+- **`VADConfig`**:
+  - `energy_threshold`: Minimum RMS energy threshold (default: `0.02`).
+  - `speech_probability_threshold`: Confidence cutoff `[0.0, 1.0]` (default: `0.5`).
+  - `min_speech_duration_ms`: Duration of sustained energy needed to confirm speech (default: `60.0 ms`). Rejects short noise clicks and pops.
+  - `min_silence_duration_ms`: Hang-over debounce window (default: `100.0 ms`) preventing clipped syllables.
+- **Speech Probability Formula**:
+  - Overridable via `chunk.metadata["speech_probability"]` for test fixtures/external models.
+  - When `energy <= energy_threshold`: `prob = 0.0`.
+  - When `energy > energy_threshold`: scales linearly via `prob = min(1.0, (energy - energy_threshold) / (2.0 * energy_threshold))`.
+  - Effective detection threshold: `effective_energy = energy_threshold * (1 + 2 * speech_probability_threshold)`. With the default `speech_probability_threshold` of 0.5, a frame needs RMS energy >= 2 * `energy_threshold` to qualify as candidate speech. For `SPEECH_START`, `timestamp` is the onset of the first qualifying frame, `chunk_sequence_id` is the confirming chunk, and `onset_sequence_id` is the first qualifying frame's sequence ID.
+- **True Onset Timestamp**:
+  - During the `min_speech_duration_ms` qualification window, candidate frames are held as SILENCE until speech duration confirms.
+  - Upon confirmation, `SPEECH_START` event timestamp carries the true onset timestamp of the *first* frame in the qualification window, preventing temporal delay.
+
+### D. Bounded Audio Stream Buffer (`src/audio/buffer.py`, D12–D13)
+- **Capacity Enforcement**: Configurable `capacity: int > 0`. Buffer size never exceeds this limit.
+- **Ordered Push Validation**:
+  1. Type check: Non-`AudioChunk` rejected with `REJECTED_INVALID`.
+  2. Duplicate check: Seen sequence IDs rejected with `REJECTED_DUPLICATE` (sliding window bounded to 4096 entries).
+  3. Late check: Older sequence IDs rejected with `REJECTED_LATE`.
+  4. Gap check: Discrete jump incidents increment `sequence_gap_events`, and missing chunks sum accumulated in `missing_chunks_total`.
+  5. Capacity check: Full buffer drops incoming chunk with `DROPPED` and increments `total_dropped`.
+  6. Enqueue: Valid chunk enqueued in FIFO order (`ACCEPTED`).
+- **Metrics Telemetry (`BufferMetrics`)**:
+  - `sequence_gap_events`: Count of discrete jump incidents.
+  - `missing_chunks_total`: Sum of all skipped sequence IDs across all gaps.
+  - `sequence_gaps_detected`: Backward-compatible alias to `sequence_gap_events`.
+  - `late_chunks_detected`, `duplicate_chunks_detected`, `total_received`, `total_consumed`, `total_dropped`.
+
+### E. End-to-End Pipeline & Fixtures (`src/audio/pipeline.py`, D14)
+- **`AudioPipeline`**: Single unified facade providing `start()`, `pause()`, `resume()`, `process_step()`, `capture_burst()`, `stop()`, and `get_status()`.
+- **Starvation-Free Buffer Drain**: `process_step()` always dequeues the oldest chunk from the buffer even when an incoming chunk is dropped due to full capacity, preventing downstream VAD starvation.
+- `process_step()` is synchronous: each step captures, enqueues, dequeues and runs VAD, so the buffer drains every step. Overflow therefore arises through `capture_burst()` (real device chunks pushed without consuming) or direct buffer pushes. `simulate_overflow()` is a test helper that starts at the buffer's expected sequence ID. On restart from STOPPED or ERROR, sequence IDs, buffer metrics, `total_processed_steps`, `last_push_result` and VAD state are all reset.
+- **`capture_burst(n)`**: Drives real overflow through the device and lifecycle path into the buffer without consuming.
+- **Deterministic Fixtures**:
+  - `generate_speech_fixture`: Continuous synthetic speech tones.
+  - `generate_silence_fixture`: Pure zero-amplitude frames.
+  - `generate_noise_burst_fixture`: Isolated short noise bursts below minimum speech duration to test rejection.
+
+---
+
+## 3. How to Run Demonstrations
+
+### Week 1 Audio Streaming Demo
+```powershell
+python -m src.cli --short
+```
+
+### Week 2 End-to-End Audio Pipeline Demo
+Execute via the dedicated Week 2 runner:
+```powershell
+python -m src.cli_w2
+```
+Or via the integrated CLI flag:
+```powershell
+python -m src.cli --week2
+```
+
+---
+
+## 4. How to Run Automated Tests
+
+### Run Full Test Suite (183 Tests)
+```powershell
+python -m unittest discover tests -v
+```
+
+### Run Week 2 Audio Test Suite Exclusively (80 Tests)
+```powershell
+python -m unittest tests.test_audio_device tests.test_audio_lifecycle tests.test_vad tests.test_audio_buffer tests.test_audio_pipeline -v
+```
+
+### Run Week 1 Audio Test Suite Exclusively (45 Tests)
+```powershell
+python -m unittest tests.test_audio_schemas tests.test_audio_errors tests.test_chunker tests.test_mock_source -v
+```
+
+### Run Honest Verification Demo (Computed live assertions)
+```powershell
+python -m src.audio.demo
+```
+
+---
+
+## 5. Mock Mode Explanation & System Guarantees
+
+- **100% Offline & Deterministic**: Runs without a physical microphone, external audio driver, cloud API keys, or network connectivity.
+- **Reproducible Test Fixtures**: Repeated runs produce byte-for-byte identical chunks, sequence IDs, and VAD decisions.
+- **Known Limitations & Future Real Hardware Roadmap**:
+  - The current device adapter uses `MockAudioDevice`. A production deployment will provide a `PyAudioDevice` or `ALSAAudioDevice` implementing `AudioDeviceInterface`.
+  - The current VAD uses rule-based RMS energy mapping (`MockVAD`). Production upgrades will integrate ML models such as Silero VAD or WebRTC VAD.
+
+---
+
+### Optional FastAPI Web Visualizer
+An interactive browser-based visualizer dashboard with live waveform rendering is also available:
+```powershell
+python -m src.server
+```
+Then navigate to [http://localhost:8000](http://localhost:8000) (or [http://127.0.0.1:8000](http://127.0.0.1:8000)) in your web browser. The visualizer includes real-time audio waveform canvas rendering, streaming controls, chunk telemetry, and a one-click **Automated Verification Suite** button to trigger test discovery live from the browser.
+
+---
+
+## Unified Execution & Quickstart Guide
+
+### 1. Interactive Multi-Workstream Demonstration
+Run the consolidated Day 7 vertical slice demonstrations across both Agentic Workflow (W4) and Context & Reasoning (W3):
+```powershell
+python demo.py
+```
+Or run a specific workstream:
+```powershell
+python -m src.cli                   # Audio Ingestion & VAD demo (W1)
+python demo.py --workstream w4      # Agentic Workflow demo
+python demo.py --workstream w3      # Context & Reasoning demo
+python scripts/demo_day7.py         # Backend & Sessions demo (W5)
+python demo/live_demo.py            # Speech-to-Text pipeline demo (W2)
+```
+
+### 2. Localhost Interactive Web Server
+Start the unified interactive web server providing the Agentic Workflow state visualizer, safety gates, and Context & Reasoning dashboard:
+```powershell
+python server.py
+```
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
+
+### 3. One-Command Mock Backend Launcher (W5)
+Launch the FastAPI session backend with zero cloud dependencies:
+```powershell
+python run_mock.py
+```
+Interactive Swagger API documentation is available at **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**.
+
+### 4. Running Automated Tests
+Run the standalone test suite:
+```powershell
+python run_tests.py
+```
+
+---
+
+# Agentic Workflow Engine (Week 1 Foundation)
+
+**Team:** SDE 3  
+**Student:** Suhani A  
+**Workstream:** W4 – Agentic Workflow  
+**Duration:** Day 1–Day 7 (Week 1 – Foundation and First Vertical Slice)
+
+---
+
+## 1. Project Purpose and Scope
+The goal of this project is to build the foundation of an Agentic Workflow Engine for the AI Voice Co-Pilot system. The engine manages structured workflow plans, enforces lifecycle states through a deterministic state machine, operates exactly two harmless mock tools in simulated mode, and enforces a strict Human-in-the-Loop safety gate where any consequential action defaults to awaiting approval.
+
+Everything runs strictly in mock mode with zero external network access, zero real API calls, and zero operating-system control.
+
+---
+
+## 2. Project Structure
+```
+AI voicebot/
+├── .gitignore                      # Git ignore rules for Python, caches, and environments
+├── requirements.txt                # Project dependencies (pydantic, pytest)
+├── README.md                       # Complete documentation and execution guide
+├── demo.py                         # Day 7 demonstration script
+├── server.py                       # Local interactive web dashboard and REST API (127.0.0.1)
+├── agentic_workflow/
+│   ├── __init__.py                 # Package exports and public interface
+│   ├── schemas.py                  # Pydantic models for all 5 workflow schemas (extra="forbid")
+│   ├── state_machine.py            # 7-state lifecycle machine with transition table
+│   ├── tools.py                    # Exactly two harmless mock tools and tool registry
+│   └── executor.py                 # Single-use approval executor with safety gate
+└── tests/
+    ├── __init__.py
+    ├── test_schemas.py             # Schema validation and invalid plan tests
+    ├── test_state_machine.py       # Legal and illegal state transition tests
+    ├── test_executor.py            # Safety gate, mock tool execution, and regression tests
+    └── test_server_api.py          # HTTP API security, CSRF token, and approval tests
+```
+
+---
+
+## 3. The Five Typed Workflow Schemas (`agentic_workflow/schemas.py`)
+All five schemas are defined once using Pydantic V2 with `model_config = ConfigDict(extra="forbid")`:
+
+1. **`WorkflowPlan`**:
+   - Fields: `workflow_id`, `run_id`, `description`, `steps` (List[WorkflowStep]), `metadata`, `state`, `created_at`.
+   - Validation: Rejects empty plans, duplicate `step_id`s, unknown step dependencies, self-dependencies, forward dependencies (dependencies must appear earlier in the step list), and cyclic dependencies.
+2. **`WorkflowStep`**:
+   - Fields: `step_id`, `name`, `tool_name`, `inputs`, `is_consequential`, `dependencies`, `status`, `output`, `error`.
+   - Validation: Strict keyword initialization; missing required fields raise `ValidationError`.
+3. **`ToolSpec`**:
+   - Fields: `name`, `description`, `input_requirements`, `is_consequential`, `risk_level`.
+   - Validation: Declares tool schema, safety rating, and whether actions default to awaiting approval.
+4. **`ApprovalRequest`**:
+   - Fields: `approval_id`, `workflow_id`, `run_id`, `step_id`, `tool_name`, `inputs`, `reason`, `risk_level`, `status`, `decided_by`, `decision_details`, `is_consumed`, `created_at`, `resolved_at`.
+   - Methods: `approve(by, comment)`, `reject(by, comment)`, and `consume()`. Single-use: once consumed by step execution, it cannot authorize another run.
+5. **`WorkflowResult`**:
+   - Fields: `workflow_id`, `final_state`, `step_outputs`, `executed_step_ids`, `approval_requests`, `error`, `start_time`, `end_time`, `summary`.
+   - Provides a serializable audit trace of plan execution.
+
+---
+
+## 4. State Machine (`agentic_workflow/state_machine.py`)
+
+The state machine implements all seven lifecycle states:
+- `draft`: Initial creation and validation state.
+- `awaiting_approval`: Safety gate paused for human authorization.
+- `running`: Steps actively executing.
+- `paused`: Temporarily suspended execution.
+- `succeeded`: Terminal state indicating successful completion of all steps.
+- `failed`: Terminal state indicating unhandled step or dependency failure.
+- `cancelled`: Terminal state indicating user cancellation or denied approval.
+
+### State Transition Diagram
+```
+    [draft]
+      │
+      ├──> [running] (direct if initial step non-consequential)
+      │          │
+      ├──> [awaiting_approval] <──┐
+      │          │                 │ (consequential action encountered)
+      │          ├──> [running] ───┘
+      │          │        │
+      │          │        ├──> [paused] ──> [running]
+      │          │        │       │
+      │          │        │       ├──> [cancelled]
+      │          │        │       └──> [failed]
+      │          │        │
+      │          │        ├──> [succeeded] (Terminal)
+      │          │        ├──> [failed]    (Terminal)
+      │          │        └──> [cancelled] (Terminal)
+      │          │
+      │          └──> [cancelled] / [failed]
+      │
+      └──> [cancelled] / [failed]
+```
+
+### Transition Guardrails:
+- **Terminal Protection**: Terminal states (`succeeded`, `failed`, `cancelled`) cannot transition to any state, including transitions to themselves. Any attempt raises `InvalidStateTransitionError`.
+- **Illegal Transitions**: Transitions such as `draft` &rarr; `succeeded` or `awaiting_approval` &rarr; `paused` are rejected immediately.
+- **Completed Workflow Lock**: Workflows in terminal states cannot be executed again without creating a new plan instance or an explicit reset.
+
+---
+
+## 5. Exactly Two Harmless Mock Tools (`agentic_workflow/tools.py`)
+
+Only the following two registered mock tools exist in the system:
+
+1. **Tool 1: Mock Task Checker (`mock_task_checker`)**:
+   - **Type**: Informational / Safe Read (`is_consequential = False`, `RiskLevel.INFORMATIONAL`).
+   - **Inputs**: `{"task_id": str}`
+   - **Behavior**: Inspects local in-memory database and returns simulated task metrics.
+   - **Policy**: Executes automatically without requiring approval.
+
+2. **Tool 2: Mock Report Generator (`mock_report_generator`)**:
+   - **Type**: Consequential Action (`is_consequential = True`, `RiskLevel.SENSITIVE`).
+   - **Inputs**: `{"title": str, "sample_data": Optional[Dict]}`
+   - **Behavior**: Generates and stores a simulated report in local mock memory.
+   - **Policy**: Consequential action that defaults to awaiting human approval.
+
+*Security Boundary:* Tool registry rejects any unapproved or foreign tool invocations (such as shell commands, email sending, or filesystem deletion) with `ToolExecutionError`.
+
+---
+
+## 6. Workflow Executor & Safety Rules (`agentic_workflow/executor.py`)
+
+### Execution Workflow:
+1. Validates the plan's schema and checks that all requested tools are registered.
+2. Checks dependency order and runs steps sequentially.
+3. **Critical Safety Gate**:
+   - Before executing any step marked as consequential or using a consequential tool, the executor halts.
+   - Transitions state machine to `AWAITING_APPROVAL`.
+   - Generates a tracked `ApprovalRequest` bound to `workflow_id`, `run_id`, and `step_id`.
+   - Tool execution is **strictly blocked** while pending.
+   - Input payloads containing `"status": "approved"` are **never** treated as authorization.
+4. **Single-Use Approvals**:
+   - Approvals can be used only once; once consumed by step execution, they are marked `is_consumed = True` and cannot authorize subsequent executions.
+   - `get_approval_request_for_step` returns the most recent request matching `workflow_id` + `run_id` + `step_id`.
+5. **Approval Resolution**:
+   - If **Approved**: Resumes execution into `running`, executes the tool, consumes the approval, and proceeds.
+   - If **Denied / Rejected**: Transitions state machine to `cancelled`, marks step `cancelled`, and never calls the tool.
+6. Returns a structured `WorkflowResult` with timing, step outputs, and audit records.
+
+---
+
+## 7. REST API Endpoints (`server.py`)
+
+The server binds securely to `127.0.0.1:8000`:
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Web dashboard displaying 7-state machine, steps, approval controls, and logs |
+| `GET` | `/api/v1/health` | Health check returning `{"status": "healthy"}` |
+| `GET` | `/api/v1/tools` | Returns specifications for the two registered mock tools |
+| `GET` | `/api/v1/state` | Returns current plan, run ID, state, pending approval, and logs |
+| `POST`| `/api/v1/agent/run` | Triggers or resumes plan execution (requires JSON + `X-Session-Token`) |
+| `POST`| `/api/v1/agent/pause` | Pauses running execution into `PAUSED` state (requires `X-Session-Token`) |
+| `POST`| `/api/v1/agent/reset` | Resets plan to `DRAFT` and clears executor approvals (requires `X-Session-Token`) |
+| `POST`| `/api/v1/agent/failing_scenario` | Loads demonstrably failing plan to showcase `FAILED` state |
+| `POST`| `/api/v1/approvals` | Submits approval decision (`"decision": "approve" \| "reject"`, `"by": str`) |
+
+---
+
+## 8. Setup & Run Instructions
+
+### Prerequisites
+- Python 3.10+ (Tested on Python 3.14)
+
+Install dependencies from `requirements.txt`:
+```powershell
+py -m pip install -r requirements.txt
+```
+
+### Running the Automated Tests
+Run the comprehensive test suite with pytest:
+```powershell
+py -m pytest tests -v
+```
+
+### Running the Terminal Demonstration (Day 7)
+```powershell
+py demo.py
+```
+
+### Running the Local Interactive Web Dashboard
+```powershell
+py server.py
+```
+Open in browser: **http://127.0.0.1:8000**
+
+---
+
+## 9. Example Workflow Execution & Expected Output
+
+### Running `py demo.py`:
+```text
+========================================================================
+  1. TOOL REGISTRY VERIFICATION
+========================================================================
+Registered mock tools count: 2
+  * mock_task_checker        [SAFE - AUTO]             Risk: informational  (Accepts sample task data and returns a simulated task status (harmless, informational).)
+  * mock_report_generator    [CONSEQUENTIAL - GATED]   Risk: sensitive      (Accepts sample data or task-checker output and generates a simulated report (consequential).)
+
+========================================================================
+  2. DEFINING TYPED WORKFLOW PLAN (Multi-Step Vertical Slice)
+========================================================================
+Workflow ID:  plan-demo-001
+Description:  Run task check followed by gated consequential report generation.
+Initial State: DRAFT
+Steps (2 total):
+   - [step-001] Inspect Codebase Audit Task (Tool: mock_task_checker, Consequential: False)
+   - [step-002] Generate Executive Audit Report (Tool: mock_report_generator, Consequential: True)
+
+========================================================================
+  3. PHASE 1: EXECUTE SAFE STEP & TRIGGER HUMAN SAFETY GATE
+========================================================================
+Workflow State:       AWAITING_APPROVAL
+Executed Steps:       ['step-001']
+Step 1 Status:        COMPLETED (Safe - Auto Completed)
+Step 1 Output:        {'status': 'success', 'task_id': 'task-audit-101', 'task_status': 'completed', 'details': {'task_id': 'task-audit-101', 'name': 'Quarterly Codebase Audit', 'status': 'completed', 'items_analyzed': 142, 'anomalies': 0}, 'simulated': True}
+Step 2 Status:        AWAITING_APPROVAL (Consequential - Gated & Not Executed)
+
+Generated Approval Requests: 1
+  * Approval ID: appr-f9d27dd7
+  * Step ID:     step-002 -> Tool: mock_report_generator
+  * Risk Level:  SENSITIVE
+  * Reason:      Action 'Generate Executive Audit Report' using tool 'mock_report_generator' is classified as consequential (sensitive).
+  * Inputs:      {"title": "Quarterly Codebase Audit Report", "sample_data": {"items_analyzed": 142, "status": "approved"}}
+  * Status:      PENDING
+
+========================================================================
+  4. HUMAN-IN-THE-LOOP APPROVAL DECISION
+========================================================================
+Reviewer (Suhani A - SDE 3) approves the consequential action...
+Approval Status:    APPROVED
+Decided By:         Suhani A (SDE 3)
+Decision Details:   Audit data verified. Report generation approved.
+
+========================================================================
+  5. PHASE 2: RESUME WORKFLOW & EXECUTE APPROVED ACTION
+========================================================================
+Final State:    SUCCEEDED
+Executed Steps: ['step-001', 'step-002']
+Step 2 Status:  COMPLETED
+Step 2 Output:  {'status': 'success', 'report_id': 'rep-5f5414ff', 'title': 'Quarterly Codebase Audit Report', 'summary': "Simulated report 'Quarterly Codebase Audit Report' generated successfully.", 'simulated': True}
+Summary:        Workflow completed successfully.
+
+========================================================================
+  6. SAFETY TEST: REJECTED APPROVAL SCENARIO
+========================================================================
+Workflow State: AWAITING_APPROVAL
+Reviewer DENIES approval for request 'appr-45d88b29'...
+Resulting State:   CANCELLED
+Step Status:       CANCELLED
+Was tool executed? False (Verified: Not executed)
+
+========================================================================
+  DEMO COMPLETED SUCCESSFULLY: ALL ACCEPTANCE CRITERIA VERIFIED
+========================================================================
+```
+
+
+---
+
+## 10. Demonstration Guide (Successful, Denied, and Failing Scenarios)
+
+### Scenario A: Successful Workflow with Explicit Approval
+1. Open **http://127.0.0.1:8000** in your browser.
+2. Click **"Run / Resume"**:
+   - Step 1 (`mock_task_checker`) automatically executes and marks `COMPLETED`.
+   - The workflow pauses at `awaiting_approval` (Safety Gate).
+   - The **Human-in-the-Loop Safety Gate Banner** appears explaining why approval is required.
+3. Click **"Approve & Proceed"**:
+   - Step 2 (`mock_report_generator`) is executed.
+   - The workflow moves to `succeeded` (terminal state) with generated report outputs.
+
+### Scenario B: Denied Approval
+1. Click **"Reset Plan"** to restore clean `DRAFT` state.
+2. Click **"Run / Resume"** to trigger the safety gate at Step 2.
+3. Click **"Reject & Halt"**:
+   - The report generator is **never executed**.
+   - The workflow transitions immediately to `cancelled` (terminal state).
+
+### Scenario C: Failing Demonstration Scenario
+1. In the dashboard, click **"Failing Scenario"**:
+   - Loads a test workflow where `mock_task_checker` deliberately receives invalid empty inputs (`{}`).
+2. Click **"Run / Resume"**:
+   - Execution halts cleanly on handled tool error.
+   - A red **Failure Banner** displays the exact diagnostic: `Parameter 'task_id' is required and must be a non-empty string.`
+   - The state node and badge update to `FAILED` (terminal state) without falsely indicating success.
+3. Click **"Reset Plan"** to cleanly clear errors and restore the normal DRAFT workflow.
+
+---
+
+## 11. Verification Summary
+- **70 Automated Pytest Tests Passing** (covering schemas, forbidden extra fields, cyclic dependencies, all 42 state transitions, mock tools, safety gate blocking, denial cancellation, single-use approvals, input spoofing resistance, terminal state lock, pause/resume, failing scenario, and HTTP security).
+- **100% Mock Mode** (purely in-memory simulated objects, zero OS access, zero real network calls).
+- **Interactive Web Interface & REST API** active at `http://127.0.0.1:8000`.
+
+
+---
+
+# AI Voice Co-Pilot - Speech-to-Text Pipeline Foundation (Workstream W2)
+
+[![CI - Test Suite](https://img.shields.io/badge/pytest-81%20passed-brightgreen.svg)]()
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
+[![Workstream](https://img.shields.io/badge/workstream-W2%20Speech--to--Text-orange.svg)]()
+[![Team](https://img.shields.io/badge/team-SDE%203-purple.svg)]()
+
+> **Engineer:** Disha D K (SDE 3)  
+> **Workstream:** W2 – Speech-to-Text Foundation (Week 1, Day 1–Day 7)  
+> **Status:** Ready for review  
+> **Working Branch:** `feature/w2-speech-to-text-foundation`  
+
+---
+
+## Installation and Setup
+
+### Prerequisites
+- Python 3.10 or higher
+
+### 1. Create and activate a virtual environment
+
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Install the project and development dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+This installs `voice_stt` as an editable package and all test dependencies (`pytest`, etc.).
+
+### 3. Install optional dashboard dependencies
+
+The interactive web dashboard (`demo/server.py`) requires FastAPI and Uvicorn, which are **not** included in the core development dependencies:
+
+```bash
+pip install fastapi uvicorn
+```
+
+These are only needed if you want to run the dashboard at `http://localhost:8000`. The core library and full test suite work without them.
+
+---
+
+## 1. Overview & Workstream Scope
+
+This repository contains the foundation and first vertical slice of the **Speech-to-Text (STT)** pipeline for **Academia — AI Voice Co-Pilot** (Team SDE 3).
+
+### What Workstream W2 Owns:
+- **Canonical Transcript Schemas**: Single shared definition of `TranscriptSegment`, `TranscriptEvent`, and `STTErrorDetail`.
+- **Provider-Neutral Adapter**: Abstract interface decoupling transcription from specific commercial vendors.
+- **Deterministic Fake Transcriber**: 100% reproducible test double operating offline without paid API keys.
+- **Ordered Segment Accumulator**: Chronologically sorts speech segments, isolates interim hypotheses, suppresses duplicates, and reconstructs continuous text.
+- **Canonical Demonstration Fixtures**: Six named fixtures (A through F) exercising standard speech, lifecycle evolution, out-of-order delivery, duplicate suppression, invalid payload rejection, and failure recovery.
+- **Observability Dashboard**: Localhost web application on `http://127.0.0.1:8000` with live SSE streaming, arrival timeline diagnostics, and live determinism audits.
+
+### What Lies Outside W2's Scope:
+Downstream capabilities described in the PRD (screen capture, OCR, multimodal LLM reasoning, agent tool execution, text-to-speech) are owned by other engineering teams (W3/W4) and will integrate with W2's contracts in subsequent milestones.
+
+---
+
+## 2. Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    subgraph AudioIngestion["1. Audio Slices / Input"]
+        Mic["Simulated PCM Chunks (100ms)"] --> AC["AudioChunk Payload"]
+    end
+
+    subgraph STTLayer["2. Speech-to-Text Adapter Layer"]
+        AC --> Adapter["BaseSTTAdapter (Provider-Neutral)"]
+        Adapter --> Fake["DeterministicFakeTranscriber"]
+        Fake -.->|"Future Real Engine"| Whisper["Whisper / Deepgram Engine"]
+    end
+
+    subgraph StreamEvents["3. Streaming Events"]
+        Fake -->|"Interim Hypothesis"| EvtInterim["TranscriptEvent (is_final=False)"]
+        Fake -->|"Committed Segment"| EvtFinal["TranscriptEvent (is_final=True)"]
+        Fake -->|"Stream Termination"| EvtComp["TranscriptEvent (stream_completed)"]
+        Fake -->|"Failure Telemetry"| EvtError["TranscriptEvent (error detail)"]
+    end
+
+    subgraph AccumulatorLayer["4. Ordered Accumulation & Deduplication"]
+        EvtInterim -->|"Transient In-Flight"| AccInterim["Interim Hypothesis Banner"]
+        EvtFinal -->|"Bisect Insertion by start_time"| AccFinal["Chronological Final Segments"]
+        EvtComp -->|"Lifecycle Demarcation"| AccComp["Stream Completed Log"]
+        EvtError -->|"Record Error without Corrupting State"| AccErr["Error Diagnostics"]
+        AccFinal -->|"Identity Deduplication"| Dedup["Deduplicated & Verified"]
+        AccFinal -->|"Concatenation"| FullTranscript["Accumulated Final Transcript"]
+    end
+
+    subgraph Presentation["5. Verification & Observability"]
+        FullTranscript --> UI["Dashboard UI (http://127.0.0.1:8000)"]
+        AccInterim --> UI
+        Dedup --> UI
+    end
+```
+
+---
+
+## 3. Canonical Transcript Schemas
+
+Both canonical schemas are defined uniquely in [`src/voice_stt/schemas.py`](src/voice_stt/schemas.py).
+
+### Timing Conventions
+- **Audio Time** (`start_time`, `end_time` in seconds): Measures elapsed duration from audio stream onset.
+- **Event Emission Time** (`timestamp` in seconds): Real adapters emit wall-clock POSIX time; the deterministic fake uses a simulated clock (seconds since stream start) so runs are reproducible.
+These two representations are never conflated.
+
+### `TranscriptSegment`
+Represents an individual recognized segment of speech.
+
+| Field | Type | Units & Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `segment_id` | `str` | Non-empty alphanumeric/UUID | No | Stable identifier for the segment. |
+| `text` | `str` | UTF-8 String | No | Transcribed content. Must be non-empty for final segments; may be empty for interim pauses. |
+| `start_time` | `float` | Seconds (`>= 0.0`, finite) | No | Audio onset timestamp relative to stream start. |
+| `end_time` | `float` | Seconds (`>= start_time`, finite) | No | Audio offset timestamp relative to stream start. |
+| `confidence` | `float` | Ratio in `[0.0, 1.0]`, finite | No | Normalized statistical confidence score. |
+| `is_final` | `bool` | Boolean | No | `True` if segment is immutable; `False` if interim hypothesis. |
+| `language` | `str` | ISO 639-1 / BCP-47 tag | No | Language identifier (e.g. `'en'`, `'en-US'`). |
+| `words` | `List[WordTiming]` | Timings within `[start, end]` | Yes | Optional word-level alignments and confidences. |
+
+### `TranscriptEvent`
+Represents a streaming event emitted by the STT adapter.
+
+| Field | Type | Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `event_id` | `str` | Non-empty UUID | No | Stable event identifier. |
+| `event_type` | `TranscriptEventType` | `interim`, `final`, `error`, `stream_completed`, etc. | No | Lifecycle event classification. |
+| `sequence_number`| `int` | Integer (`>= 0`) | No | Monotonic counter tracking stream order. |
+| `timestamp` | `float` | Seconds (`>= 0.0`, finite) | No | Emission timestamp (wall-clock for real adapters; simulated clock for fake). |
+| `session_id` | `Optional[str]` | Alphanumeric | Yes | Correlation ID linking event to user session. |
+| `segment` | `Optional[TranscriptSegment]` | Mandatory for `interim` and `final` | Yes | Associated segment payload. |
+| `error` | `Optional[STTErrorDetail]` | Mandatory for `error` | Yes | Structured error details (`code`, `message`, `request_id`, `retryable`, `details`). |
+| `metadata` | `Dict[str, Any]` | Generic dictionary | No | Diagnostic and telemetry properties. |
+
+### `STTErrorDetail`
+Standardized error payload conforming to API Specifications & Interface Contracts (doc 04), Section 5.
+
+| Field | Type | Constraints | Nullable | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `code` | `str` | Non-empty string | No | Machine-readable error code (e.g., `'INVALID_PAYLOAD'`). |
+| `message` | `str` | Non-empty string | No | Human-readable explanation. Credential patterns rejected. |
+| `request_id` | `Optional[str]` | String | Yes | Correlation request ID conforming to doc 04, Section 5. |
+| `retryable` | `bool` | Boolean | No | Indicates whether client retry could resolve failure. |
+| `details` | `Dict[str, Any]` | Generic dictionary | No | Supplementary diagnostic context. |
+
+---
+
+## 4. Error Contract
+
+Per **API Specifications & Interface Contracts (doc 04), Section 5**, standard API errors follow this envelope:
+
+```json
+{
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "The request is invalid.",
+    "request_id": "req-001"
+  }
+}
+```
+
+The `STTErrorDetail` schema implements `.to_api_error() -> Dict[str, Any]`, producing this exact envelope:
+
+```python
+from voice_stt.schemas import STTErrorDetail
+
+error = STTErrorDetail(
+    code="INVALID_PAYLOAD",
+    message="Audio chunk duration must be positive.",
+    request_id="req-voice-1234",
+    retryable=False,
+)
+api_envelope = error.to_api_error()
+# Returns:
+# {
+#     "error": {
+#         "code": "INVALID_PAYLOAD",
+#         "message": "Audio chunk duration must be positive.",
+#         "request_id": "req-voice-1234",
+#         "retryable": False,
+#         "details": {}
+#     }
+# }
+```
+
+Security enforcement: `STTErrorDetail` rejects messages containing credentials (such as `sk-...`, `Bearer ...`, or passwords).
+
+---
+
+## 5. Event Lifecycle (`TranscriptEventType`)
+
+The STT pipeline supports the following lifecycle events:
+
+- **Active Mock Events:**
+  - `interim`: Tentative partial hypothesis in flight (`is_final=False`, `segment` present).
+  - `final`: Committed, immutable speech segment (`is_final=True`, `segment` present).
+  - `error`: Pipeline or simulated error payload (`error` present, `segment=None`).
+  - `stream_completed`: Stream termination delimiter emitted after the last chunk and its final segment (`segment=None`, `error=None`).
+- **Reserved Events (for future real-provider VAD adapters):**
+  - `speech_started`: Voice Activity Detection (VAD) speech onset trigger.
+  - `speech_ended`: Voice Activity Detection (VAD) speech silence/offset trigger.
+
+> **Fixture mode behaviour:** When `DeterministicFakeTranscriber` is configured with a named fixture, it emits exactly **one fixture event per audio chunk** and does **not** emit a `STREAM_COMPLETED` event. `STREAM_COMPLETED` is only emitted in scripted and hash modes at end of stream.
+
+---
+
+## 6. Canonical Named Fixtures
+
+Defined in [`src/voice_stt/fixtures.py`](src/voice_stt/fixtures.py):
+
+| Fixture | Name | Persona | What It Proves |
+| :---: | :--- | :--- | :--- |
+| **A** | **Normal Multi-Segment** | Student Developer | Split across 2 chronological segments (*"Why is this application"* &rarr; *"showing this error?"*). |
+| **B** | **Interim-to-Final Lifecycle** | Research Student | 4 progressive interim hypotheses culminating in 1 finalized segment. |
+| **C** | **Out-of-Order Delivery** | General User | Segments dispatched in order [2, 3, 1]; accumulator correctly sorts them by audio `start_time`. |
+| **D** | **Duplicate Delivery** | System Monitor | Repeated delivery of identical event suppressed without duplicating final text. |
+| **E** | **Invalid Payload Rejection** | Fault Injection | Malformed payload (`end_time < start_time`, `confidence > 1.0`) rejected; accumulator state preserved. |
+| **F** | **Simulated Adapter Failure** | Resilience Tester | Controlled failure event emitted; verified error state and clean recovery via reset. |
+
+> **Note on fixture timestamps:** All named fixtures use fixed hardcoded sample audio timestamps (e.g., Fixture A: `0.0s–0.8s`, `0.8s–1.5s`). These are illustrative audio time spans, not real-time wall-clock values.
+
+---
+
+## 7. Running the Automated Test Suite
+
+The test suite contains **81 passing unit tests** covering normal, boundary, failure, and contract behaviors:
+
+```bash
+# Cross-platform
+python -m pytest -v
+
+# Windows PowerShell
+.\.venv\Scripts\python.exe -m pytest -v
+```
+
+### Coverage Highlights:
+- **Schemas**: Valid/invalid segments, boundary timestamps, non-finite values (NaN, Inf), empty text policies, doc-04 error envelopes, and secret redaction.
+- **Adapter**: Abstract lifecycle, context manager, state transitions, lookahead stream flushing, and `AudioChunk.is_last` handling.
+- **Determinism**: Multi-pass bit-for-bit repeatability across scripted and hash modes including `STREAM_COMPLETED`.
+- **Accumulator**: Audio chronological ordering, out-of-order reordering, identity deduplication, late interim protection, equal timestamp handling, and no stale chunk telemetry.
+
+---
+
+## 8. Running the Demonstrations
+
+### Option 1: Interactive Web Dashboard (Optional Extra Scope)
+Start the localhost server (binds `127.0.0.1` only):
+```bash
+# Cross-platform
+python demo/server.py
+
+# Windows PowerShell
+.\.venv\Scripts\python.exe demo/server.py
+```
+Open your browser to:
+👉 **`http://localhost:8000`** (or `http://127.0.0.1:8000`)
+
+*Note: Dashboard routes are namespaced under `/demo` (`/demo/health`, `/demo/stream`, `/demo/audit`, `/demo/reset`) to prevent collision with Backend team `/api/v1` routes.*
+
+### Option 2: CLI Demonstration Script
+Run individual fixtures or all fixtures from the command line:
+```bash
+# Cross-platform
+python demo/live_demo.py
+python demo/live_demo.py --fixture C
+python demo/live_demo.py --all
+
+# Windows PowerShell
+.\.venv\Scripts\python.exe demo/live_demo.py --all
+```
+
+---
+
+## 9. Pull Request Checklist
+
+- [x] All 81 automated tests pass locally.
+- [x] Working branch is `feature/w2-speech-to-text-foundation` (zero direct pushes to `main`).
+- [x] No secrets, `.env` files, audio recordings, or credentials committed.
+- [x] Canonical schemas defined once in `src/voice_stt/schemas.py`.
+- [x] Provider-neutral adapter and deterministic fake transcriber verified.
+- [x] Ordered accumulator handles chronological ordering, duplicates, and late interims.
+- [x] Day 7 live demo verified on localhost and CLI.
+
+
+---
+
+---
+
+# Workstream W3 — Context & Reasoning (Amruta A J — Version 1)
+
+> The following section documents the W3 Context & Reasoning contribution by **Amruta A J**.
+> It is preserved here alongside the W2 STT contribution to keep all Week 1 workstream
+> implementations on the shared branch `AI-Voice-Co-pilot-Version-1`.
+
+
+# Workstream W3 – Context & Reasoning: Context Schemas, Mock Reasoning & Versioned Prompts
+
+**Team**: SDE 3
+**Developer**: Amruta A J
+**Workstream**: W3 – Context & Reasoning
+**Sprint / Duration**: Week 1 (Day 1 – Day 7 Foundation & First Vertical Slice)
+**Status**: Completed & Validated (58/58 Unit Tests Passing)
+
+---
+
+## W3-1. Overview & Scope
+
+This module establishes the foundational **Context and Reasoning Layer** for the **AI Voice Co-Pilot** system as defined in the Product Requirements Document (PRD) and System Design Document (SDD).
+
+In strict accordance with the assigned scope for **Workstream W3**, this module implements:
+1. **Context Schemas**: Strongly-typed, validated Pydantic models (`ScreenContext`, `ContextItem`, `SourceReference`, `ReasoningRequest`, `ReasoningResult`) with strict schema validation (`extra="forbid"`), length limits, pattern enforcement, and timezone-aware datetimes.
+2. **Synthetic Context Fixtures**: Fictional developer and document workspace fixtures with **screen capture disabled by default** (`capture_enabled=False`, enforced by model validators).
+3. **Deterministic Mock Reasoning**: A predictable, repeatable reasoning engine that produces grounded responses with source citations, risk categorization (Categories A, B, C, D), Human-in-the-Loop safety gates, and structured error handling (`reason_safe`).
+4. **Hardened Versioned Prompts & Security Boundaries**: Immutable prompt templates that strictly separate **trusted system instructions** from **untrusted contextual content**, escaping HTML entities and neutralizing section headers to prevent prompt injection.
+5. **Validation & Unit Testing**: 58 automated test cases covering valid, invalid, and edge-case inputs with 100% passing results.
+
+> **Scope Boundary Note**: This module operates in offline mock mode without paid API keys, without speech-to-text / text-to-speech hardware dependencies, and without live OS screen capturing. Third-party dependencies are strictly limited to `pydantic>=2.0,<3`.
+
+---
+
+## W3-2. Directory Structure (W3 files)
+
+```text
+src/
+  context/
+    schemas.py          # The 5 core schemas with validation & constraints
+    fixtures.py         # Synthetic fixtures (capture disabled by default)
+  prompts/
+    versioned_prompts.py # Prompt registry, versioning & injection defense
+  reasoning/
+    mock_engine.py      # Deterministic mock reasoning & grounding
+tests/
+  test_context_schemas.py  # Tests for 5 schemas and validation constraints (19 tests)
+  test_synthetic.py        # Tests for synthetic context & safety defaults (7 tests)
+  test_mock_reasoning.py   # Tests for deterministic reasoning & safety gates (22 tests)
+  test_prompts.py          # Tests for versioning & untrusted content isolation (10 tests)
+web/
+  index.html / style.css / app.js   # Web dashboard interface
+demo.py          # Interactive demonstration script
+run_tests.py     # Standalone test runner with structured reports
+server.py        # Localhost development server (port 8000)
+requirements.txt # Dependency specification (pydantic>=2.0,<3)
+```
+
+---
+
+## W3-3. Safety Architecture & Intent Routing
+
+- **Category A (Informational)**: Read-only queries. `requires_approval = False`.
+- **Category B (Low-Risk)**: Workspace search. `action_required = True`, `requires_approval = False`.
+- **Category C (Sensitive)**: File manipulation. `action_required = True`, `requires_approval = True`.
+- **Category D (Destructive)**: Deletions. `action_required = True`, `requires_approval = True`.
+
+---
+
+## W3-4. How to Run (W3)
+
+```powershell
+pip install -r requirements.txt
+python run_tests.py            # 58 tests, all passing
+python demo.py                 # Interactive demonstration
+python server.py               # Localhost server at http://localhost:8000
+```
+
+### W3 Test Results
+```text
+SUMMARY: Ran 58 tests in 0.009s
+Passed: 58 | Failures: 0 | Errors: 0
+Status: ALL TESTS PASSED [OK]
+```
+
+---
+
+## W3-5. Field Mapping for W2/W4
+
+| Internal Schema Field | External API Field | Description |
+| :--- | :--- | :--- |
+| `ReasoningRequest.user_query` | `message` | User prompt/query text |
+| `ReasoningResult.response_text` | `response` | Output text produced by reasoning |
+| `ReasoningResult.status == "success"` | `completed` | Task completion indicator |
+| `ReasoningResult.requires_approval` | `requires_approval` | Human-in-the-loop gate required |
+
+---
+---
+
+# Part 4: Workstream W5 – Backend & Sessions
+
+**Developer**: Vaishnavi G  
+**Workstream**: W5 – Backend and Sessions  
+**Test Suite**: 27 Automated Unit & Route Tests (100% Passing)
+
+## 1. Overview & Architecture
+
+This module establishes the core **Backend Foundation and Sessions Layer** for the AI Voice Co-Pilot system:
+1. **Application Skeleton & Probes**: FastAPI backend with /health and /ready probes monitoring service vitality and in-memory repository readiness.
+2. **Typed Error Envelope**: Standardized schema (code, message_safe_for_user, 
+etryable, correlation_id, details_redacted) with automatic redaction of sensitive credentials, Bearer tokens, and secrets (src/core/security.py).
+3. **Request & Correlation-ID Middleware**: RequestCorrelationMiddleware ensures every request and response carries X-Request-ID and X-Correlation-ID.
+4. **Session State Machine & In-Memory Repository**: Thread-safe in-memory session engine (InMemorySessionRepository) with strict validation across all 7 lifecycle states: created, ctive, paused, stopping, completed, ailed, and expired.
+5. **One-Command Mock Launcher**: Starts the backend with zero external dependencies (python run_mock.py or .\scripts\run_mock.bat).
+6. **Cross-Team API Contracts**: 6 standardized contracts defined in docs/api-contracts/ (oice.md, context.md, i-chat.md, gent-plan.md, 	ools-execute.md, pprovals.md) and cross-team integration guide in docs/INTEGRATION_GUIDE.md.
+
+## 2. Session Lifecycle States
+
+| State | Permitted Transitions | Notes |
+| :--- | :--- | :--- |
+| created | ctive, ailed, expired | Default state on creation. |
+| ctive | paused, stopping, completed, ailed, expired | Processing user speech/context. |
+| paused | ctive, stopping, ailed, expired | Suspended interaction. |
+| stopping | completed, ailed | Graceful shutdown in progress. |
+| completed | *None* | Terminal state. |
+| ailed | *None* | Terminal state. |
+| expired | *None* | Terminal state. |
+
+## 3. How to Run W5 Backend Features
+
+### One-Command Mock Launcher
+`powershell
+python run_mock.py
+`
+Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive Swagger UI.
+
+### Live Demonstration
+`powershell
+python scripts/demo_day7.py
+`
+
+### Running Backend Unit & Route Tests
+`powershell
+python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors.py tests/test_sessions.py -v
+`
+
+---
+
+# Part 5: Workstream W6 – Frontend & UX (Varsha B S)
+
+> **Developer**: Varsha B S  
+> **Workstream**: W6 – Frontend and UX  
+> **Test Suite**: 41 Automated Component, Contract, and Hook Tests (100% Passing)
+
+## 1. Overview & Capabilities
+
+- **Accessible App Shell**: Complete desktop assistant layout featuring keyboard navigation, visible focus indicators, skip-link, and ARIA landmarks.
+- **Mock-Mode Banner**: Clear indicator of offline mock-mode operation with built-in simulated network latency and error injection.
+- **Session Controls**: State management for initiating, pausing, resuming, ending, and resetting sessions with live turn and duration tracking.
+- **Microphone & Voice States**: State machine for permissions ('prompt', 'granted', 'denied') and activity ('idle', 'listening', 'processing', 'speaking', 'muted') with interruption controls.
+- **Transcript & Execution Timeline**: Chronological feed rendering user speech, context captures, AI reasoning, tool execution, and Human-in-the-Loop Safety Approval Cards.
+- **Typed API Client**: Strict TypeScript contracts matching SDD API specification with standardized error handling.
+- **Day 7 Interactive Demo Runner**: Stepper and autoplay controller for vertical slice demonstrations.
+
+## 2. How to Run Frontend Locally
+
+```bash
+npm install
+npm run dev
+```
+
+### Run Frontend Unit & Component Tests
+```bash
+npm test
+```
