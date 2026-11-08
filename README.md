@@ -226,6 +226,158 @@ python -m unittest discover tests -v
 
 ---
 
+---
+
+# Workstream W1/W2 – Audio Pipeline, Lifecycle, VAD & Buffer (Week 2, D8–D14)
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: W1/W2 – Audio Capture, Device Adapter, Lifecycle, VAD & Bounded Buffer  
+**Duration**: Day 8 – Day 14 (Week 2 – Advanced Ingestion & Pipeline Orchestration)  
+**Total Audio Test Suite**: 125 Passing Audio Tests (45 Week 1 + 80 Week 2) | **Total Repository Suite**: 183 Tests (100% Passing)
+
+---
+
+## 1. Week 1 vs Week 2 Architecture Evolution
+
+Week 2 builds directly upon the authoritative foundational schemas established in Week 1 without duplication:
+- **Canonical Schema Re-use (`src/schemas/audio.py`)**: `AudioFormat`, `AudioChunk`, and `AudioError` remain the single source of truth across all modules.
+- **Layered Architecture**:
+  1. **Hardware / Device Abstraction Layer (`src/audio/device.py`, D8–D9)**: Decouples physical/virtual devices from ingestion code. Provides permission lifecycle (`UNKNOWN`, `REQUESTED`, `GRANTED`, `DENIED`, `UNSUPPORTED`), device inventory, and hardware error simulation.
+  2. **Lifecycle Controller (`src/audio/lifecycle.py`, D10–D11)**: Governs state transitions across `IDLE`, `STARTING`, `RUNNING`, `PAUSED`, `STOPPING`, `STOPPED`, and `ERROR`. Enforces safety preconditions (device selected and permission `GRANTED`) before starting.
+  3. **Voice Activity Detection (`src/audio/vad.py`, D10–D11)**: Rule-based RMS energy detection evaluating speech confidence, rejecting short noise bursts (< 60ms), and applying hang-over debounce for natural pauses.
+  4. **Bounded Audio Stream Buffer (`src/audio/buffer.py`, D12–D13)**: Strict capacity bounds with an explicit overflow/backpressure policy (drops incoming chunks when full, records cumulative drop counter, never silently discards). Tracks monotonic sequence gaps, late chunks, and duplicates.
+  5. **Integrated Pipeline Orchestrator (`src/audio/pipeline.py`, D14)**: Connects all subsystems into a unified `process_step()` streaming loop with deterministic synthetic audio fixtures.
+
+---
+
+## 2. Component Specifications
+
+### A. Device Adapter & Permissions (`src/audio/device.py`, D8–D9)
+- **`AudioPermissionState`**: `UNKNOWN`, `REQUESTED`, `GRANTED`, `DENIED`, `UNSUPPORTED`. Supports observable `REQUESTED` state via pending callbacks and two-step resolution (`resolve_permission`).
+- **`AudioDeviceInfo`**: Validated metadata (`device_id`, `name`, `channels`, `sample_rate`, `is_default`, `is_mock`, `supported`). Only rejects device selection when `supported=False` (`UNSUPPORTED_DEVICE`).
+- **Format Validation on Open**: `open()` strictly validates format compatibility (`channels` and `sample_rate`) between active `AudioFormat` and selected device (`INVALID_CHANNELS`, `INVALID_SAMPLE_RATE`).
+- **Device Switching Lock**: Refuses device switching while stream is open (`DEVICE_BUSY`).
+- **Continuous Permission Enforcement**: Every `read_chunk()` call verifies `AudioPermissionState.GRANTED`. Revocation immediately closes hardware and raises `PERMISSION_DENIED`.
+
+### B. Audio Lifecycle Controller (`src/audio/lifecycle.py`, D10–D11)
+- **Lifecycle States**:
+  - `IDLE`: Initial quiescent state.
+  - `STARTING`: Verifying device selection & permission, opening hardware.
+  - `RUNNING`: Actively streaming and emitting chunks.
+  - `PAUSED`: Temporarily suspended without dropping session state.
+  - `STOPPING`: Purging resources and closing device.
+  - `STOPPED`: Clean terminal state (idempotent stop).
+  - `ERROR`: Captures fatal errors and hardware faults safely.
+- **Strict Transition Rules**:
+  - `IDLE -> STARTING -> RUNNING`
+  - `RUNNING <-> PAUSED`
+  - `RUNNING / PAUSED -> STOPPING -> STOPPED`
+  - Rejects invalid transitions with `ILLEGAL_LIFECYCLE_TRANSITION`.
+- **Restart Policy**:
+  - Restart is supported from `STOPPED` or `ERROR`.
+  - When restarting, `AudioLifecycleController.start()` resets internal sequence IDs to -1, timestamps to -1.0, and captured chunk counters to 0, preventing `OUT_OF_ORDER_CHUNK` exceptions on restarted devices.
+  - Can be explicitly disabled via `allow_restart_from_stopped=False`.
+- **Stream Termination & Out-of-Order Handling**:
+  - Exposes `is_end_of_stream` property transitioning to `True` when device returns `None`.
+  - If device emits a non-monotonic chunk, controller immediately transitions to `ERROR`, records `last_error`, closes the device, and raises `OUT_OF_ORDER_CHUNK`.
+
+### C. Voice Activity Detection (`src/audio/vad.py`, D10–D11)
+- **Classification Events (`VADEventType`)**: `SPEECH_START`, `SPEECH_ONGOING`, `SPEECH_END`, `SILENCE`.
+- **`VADConfig`**:
+  - `energy_threshold`: Minimum RMS energy threshold (default: `0.02`).
+  - `speech_probability_threshold`: Confidence cutoff `[0.0, 1.0]` (default: `0.5`).
+  - `min_speech_duration_ms`: Duration of sustained energy needed to confirm speech (default: `60.0 ms`). Rejects short noise clicks and pops.
+  - `min_silence_duration_ms`: Hang-over debounce window (default: `100.0 ms`) preventing clipped syllables.
+- **Speech Probability Formula**:
+  - Overridable via `chunk.metadata["speech_probability"]` for test fixtures/external models.
+  - When `energy <= energy_threshold`: `prob = 0.0`.
+  - When `energy > energy_threshold`: scales linearly via `prob = min(1.0, (energy - energy_threshold) / (2.0 * energy_threshold))`.
+  - Effective detection threshold: `effective_energy = energy_threshold * (1 + 2 * speech_probability_threshold)`. With the default `speech_probability_threshold` of 0.5, a frame needs RMS energy >= 2 * `energy_threshold` to qualify as candidate speech. For `SPEECH_START`, `timestamp` is the onset of the first qualifying frame, `chunk_sequence_id` is the confirming chunk, and `onset_sequence_id` is the first qualifying frame's sequence ID.
+- **True Onset Timestamp**:
+  - During the `min_speech_duration_ms` qualification window, candidate frames are held as SILENCE until speech duration confirms.
+  - Upon confirmation, `SPEECH_START` event timestamp carries the true onset timestamp of the *first* frame in the qualification window, preventing temporal delay.
+
+### D. Bounded Audio Stream Buffer (`src/audio/buffer.py`, D12–D13)
+- **Capacity Enforcement**: Configurable `capacity: int > 0`. Buffer size never exceeds this limit.
+- **Ordered Push Validation**:
+  1. Type check: Non-`AudioChunk` rejected with `REJECTED_INVALID`.
+  2. Duplicate check: Seen sequence IDs rejected with `REJECTED_DUPLICATE` (sliding window bounded to 4096 entries).
+  3. Late check: Older sequence IDs rejected with `REJECTED_LATE`.
+  4. Gap check: Discrete jump incidents increment `sequence_gap_events`, and missing chunks sum accumulated in `missing_chunks_total`.
+  5. Capacity check: Full buffer drops incoming chunk with `DROPPED` and increments `total_dropped`.
+  6. Enqueue: Valid chunk enqueued in FIFO order (`ACCEPTED`).
+- **Metrics Telemetry (`BufferMetrics`)**:
+  - `sequence_gap_events`: Count of discrete jump incidents.
+  - `missing_chunks_total`: Sum of all skipped sequence IDs across all gaps.
+  - `sequence_gaps_detected`: Backward-compatible alias to `sequence_gap_events`.
+  - `late_chunks_detected`, `duplicate_chunks_detected`, `total_received`, `total_consumed`, `total_dropped`.
+
+### E. End-to-End Pipeline & Fixtures (`src/audio/pipeline.py`, D14)
+- **`AudioPipeline`**: Single unified facade providing `start()`, `pause()`, `resume()`, `process_step()`, `capture_burst()`, `stop()`, and `get_status()`.
+- **Starvation-Free Buffer Drain**: `process_step()` always dequeues the oldest chunk from the buffer even when an incoming chunk is dropped due to full capacity, preventing downstream VAD starvation.
+- `process_step()` is synchronous: each step captures, enqueues, dequeues and runs VAD, so the buffer drains every step. Overflow therefore arises through `capture_burst()` (real device chunks pushed without consuming) or direct buffer pushes. `simulate_overflow()` is a test helper that starts at the buffer's expected sequence ID. On restart from STOPPED or ERROR, sequence IDs, buffer metrics, `total_processed_steps`, `last_push_result` and VAD state are all reset.
+- **`capture_burst(n)`**: Drives real overflow through the device and lifecycle path into the buffer without consuming.
+- **Deterministic Fixtures**:
+  - `generate_speech_fixture`: Continuous synthetic speech tones.
+  - `generate_silence_fixture`: Pure zero-amplitude frames.
+  - `generate_noise_burst_fixture`: Isolated short noise bursts below minimum speech duration to test rejection.
+
+---
+
+## 3. How to Run Demonstrations
+
+### Week 1 Audio Streaming Demo
+```powershell
+python -m src.cli --short
+```
+
+### Week 2 End-to-End Audio Pipeline Demo
+Execute via the dedicated Week 2 runner:
+```powershell
+python -m src.cli_w2
+```
+Or via the integrated CLI flag:
+```powershell
+python -m src.cli --week2
+```
+
+---
+
+## 4. How to Run Automated Tests
+
+### Run Full Test Suite (183 Tests)
+```powershell
+python -m unittest discover tests -v
+```
+
+### Run Week 2 Audio Test Suite Exclusively (80 Tests)
+```powershell
+python -m unittest tests.test_audio_device tests.test_audio_lifecycle tests.test_vad tests.test_audio_buffer tests.test_audio_pipeline -v
+```
+
+### Run Week 1 Audio Test Suite Exclusively (45 Tests)
+```powershell
+python -m unittest tests.test_audio_schemas tests.test_audio_errors tests.test_chunker tests.test_mock_source -v
+```
+
+### Run Honest Verification Demo (Computed live assertions)
+```powershell
+python -m src.audio.demo
+```
+
+---
+
+## 5. Mock Mode Explanation & System Guarantees
+
+- **100% Offline & Deterministic**: Runs without a physical microphone, external audio driver, cloud API keys, or network connectivity.
+- **Reproducible Test Fixtures**: Repeated runs produce byte-for-byte identical chunks, sequence IDs, and VAD decisions.
+- **Known Limitations & Future Real Hardware Roadmap**:
+  - The current device adapter uses `MockAudioDevice`. A production deployment will provide a `PyAudioDevice` or `ALSAAudioDevice` implementing `AudioDeviceInterface`.
+  - The current VAD uses rule-based RMS energy mapping (`MockVAD`). Production upgrades will integrate ML models such as Silero VAD or WebRTC VAD.
+
+---
+
 ### Optional FastAPI Web Visualizer
 An interactive browser-based visualizer dashboard with live waveform rendering is also available:
 ```powershell

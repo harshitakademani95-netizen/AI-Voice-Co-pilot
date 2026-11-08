@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Voice Copilot — Audio & VAD Visualizer (W1)</title>
+  <title>AI Voice Copilot — Audio Device, Lifecycle, VAD & Buffer (Week 2)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -124,9 +124,9 @@
   <div class="container">
     <header>
       <div>
-        <span class="badge">WEEK 1 FOUNDATION & FIRST VERTICAL SLICE</span>
-        <h1>AI Voice Copilot — Audio & VAD Visualizer</h1>
-        <div class="subtitle">Team: SDE 3 | Student: Harshita G Kademani | Workstream: W1 (Audio & VAD)</div>
+        <span class="badge">WEEK 2 ADVANCED INGESTION & PIPELINE (D8–D14)</span>
+        <h1>AI Voice Copilot — Audio Device, Lifecycle, VAD & Buffer</h1>
+        <div class="subtitle">Team: SDE 3 | Student: Harshita G Kademani | Workstream: W1/W2 (Audio, Lifecycle & VAD)</div>
       </div>
       <div>
         <button id="runTestsBtn" class="btn btn-success" type="button">Run Automated Unit Tests</button>
@@ -169,21 +169,22 @@
 
       <!-- Unit Test Runner & Verification -->
       <div class="card">
-        <div class="card-title">Automated Verification Suite (<span id="headingTestCount">103</span> Tests)</div>
+        <div class="card-title">Automated Verification Suite (<span id="headingTestCount">183</span> Tests)</div>
         <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
           <div id="testBadge" class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border-color: rgba(52, 211, 153, 0.3);">
             Status: <span id="testStatus">Ready to Run</span>
           </div>
           <div class="badge" style="background: rgba(255, 255, 255, 0.05); color: #94a3b8; border-color: rgba(255, 255, 255, 0.1);">
-            <span id="testSummary">103 Total Tests</span>
+            <span id="testSummary">183 Total Tests</span>
           </div>
         </div>
         <div class="test-log" id="testLog">Click "Run Automated Unit Tests" above to execute tests across the test suite:
-* AudioChunk, AudioFormat, AudioError schemas
-* Invalid sample rates and channels validation
-* Empty chunk rejection (EMPTY_CHUNK_DATA)
-* Corrupt unaligned chunk rejection (CORRUPT_CHUNK_DATA)
-* MockMicrophone determinism and stream reset</div>
+* Audio Device Adapter & Permissions (test_audio_device.py, 19 tests)
+* Lifecycle Controller & Transitions (test_audio_lifecycle.py, 17 tests)
+* Voice Activity Detection & RMS Energy (test_vad.py, 13 tests)
+* Bounded Audio Stream Buffer & Overflow (test_audio_buffer.py, 11 tests)
+* Integrated Audio Pipeline & Fixtures (test_audio_pipeline.py, 20 tests)
+* Canonical Schemas & Week 1 Foundation (45 tests)</div>
       </div>
     </div>
 

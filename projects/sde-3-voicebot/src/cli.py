@@ -1,13 +1,16 @@
 """
-CLI Demonstration for AI Voice Copilot W1 Audio Pipeline.
+CLI Demonstration for AI Voice Copilot Audio Pipeline.
 
-Student: Harshita G Kademani | Team: SDE 3 | Workstream: W1 - Audio and VAD
+Student: Harshita G Kademani | Team: SDE 3 | Workstream: W1/W2 - Audio and VAD
 Project: AI Voice Copilot
 
 Usage:
     python -m src.cli [OPTIONS]
+    python -m src.cli --week2
 
 Options:
+    --week2              Run the Week 2 (D8-D14) Device, Lifecycle, VAD, and Buffer demo
+    --short              Run a quick short demo (5 chunks / 100ms) for quick inspection
     --duration FLOAT     Total stream duration in seconds (default: 1.0)
     --chunk-ms FLOAT     Chunk duration in milliseconds (default: 20.0)
     --sample-rate INT    Audio sample rate in Hz (default: 16000)
@@ -34,10 +37,15 @@ def create_parser() -> argparse.ArgumentParser:
         prog="python -m src.cli",
         description=(
             "AI Voice Copilot - Audio Pipeline CLI Demo\n"
-            "Workstream: W1 - Audio and VAD | Foundation Vertical Slice\n"
+            "Workstream: W1/W2 - Audio, Lifecycle, VAD & Buffer\n"
             "(Note: Uses deterministic mock audio; does not capture from real microphone hardware)"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--week2",
+        action="store_true",
+        help="Run the Week 2 (D8-D14) Device Adapter, Lifecycle, VAD, and Buffer demonstration",
     )
     parser.add_argument(
         "--short",
@@ -83,7 +91,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def run_cli_demo(args: argparse.Namespace) -> int:
-    """Run the audio streaming demonstration."""
+    """Run the Week 1 audio streaming demonstration."""
     print("=" * 86)
     print("AI Voice Copilot - Audio Pipeline Demonstration (W1)")
     print("Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)")
@@ -169,7 +177,11 @@ def main() -> None:
     """Entry point for CLI demo."""
     parser = create_parser()
     args = parser.parse_args()
-    exit_code = run_cli_demo(args)
+    if getattr(args, "week2", False):
+        from src.cli_w2 import run_week2_demo
+        exit_code = run_week2_demo()
+    else:
+        exit_code = run_cli_demo(args)
     sys.exit(exit_code)
 
 
