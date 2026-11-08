@@ -30,6 +30,14 @@ from voice_stt.fixtures import (
 )
 from voice_stt.fake_transcriber import DeterministicFakeTranscriber
 from voice_stt.accumulator import OrderedSegmentAccumulator
+from voice_stt.orchestrator import (
+    OrchestratorClosedError,
+    RetryConfig,
+    TranscriptionOrchestrator,
+    normalize_stt_error,
+    sanitize_error_message,
+)
+from src.audio.preprocessing import AudioPreprocessor
 
 __all__ = [
     "AudioChunk",
@@ -48,4 +56,10 @@ __all__ = [
     "get_all_fixtures",
     "DeterministicFakeTranscriber",
     "OrderedSegmentAccumulator",
+    "TranscriptionOrchestrator",
+    "OrchestratorClosedError",
+    "RetryConfig",
+    "normalize_stt_error",
+    "sanitize_error_message",
+    "AudioPreprocessor",
 ]

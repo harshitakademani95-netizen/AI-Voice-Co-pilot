@@ -46,6 +46,8 @@ class OrderedSegmentAccumulator:
         self._seen_segment_ids: Set[str] = set()
         self._seen_event_ids: Set[str] = set()
         self._interim_segment: Optional[TranscriptSegment] = None
+        self._active_interim_sequence: Optional[int] = None
+        self._active_interim_timestamp: Optional[float] = None
         self._last_error: Optional[STTErrorDetail] = None
 
         # Precise Telemetry & Diagnostics
@@ -113,8 +115,23 @@ class OrderedSegmentAccumulator:
             self._record_arrival(event, is_duplicate=False, was_reordered=False)
             return True
 
+        # Check for older / out-of-order interim event when active interim exists
+        if event.event_type == TranscriptEventType.INTERIM:
+            if self._interim_segment is not None and self._active_interim_sequence is not None:
+                if event.sequence_number < self._active_interim_sequence:
+                    self._record_arrival(
+                        event,
+                        is_duplicate=False,
+                        was_reordered=True,
+                        is_late_interim=True,
+                    )
+                    return False
+
         # Process segment payload
         result = self.ingest_segment(event.segment, event_id=event.event_id)
+        if result and event.event_type == TranscriptEventType.INTERIM:
+            self._active_interim_sequence = event.sequence_number
+            self._active_interim_timestamp = event.timestamp
         return result
 
     def ingest_segment(self, segment: TranscriptSegment, event_id: Optional[str] = None) -> bool:
@@ -137,9 +154,57 @@ class OrderedSegmentAccumulator:
 
     def _handle_interim_segment(self, segment: TranscriptSegment, event_id: Optional[str] = None) -> bool:
         """Process an in-flight interim segment hypothesis."""
-        # Late Interim Protection:
+        # Check against active interim segment
+        if self._interim_segment is not None:
+            # 1. Duplicate interim suppression: ignore if identical to current interim hypothesis
+            if (
+                self._interim_segment.segment_id == segment.segment_id
+                and self._interim_segment.text == segment.text
+                and abs(self._interim_segment.start_time - segment.start_time) < 1e-4
+                and abs(self._interim_segment.end_time - segment.end_time) < 1e-4
+            ):
+                self._duplicates_suppressed += 1
+                self._record_arrival(
+                    None,
+                    segment=segment,
+                    is_duplicate=True,
+                    was_reordered=False,
+                    is_late_interim=False,
+                    event_id=event_id,
+                )
+                return False
+
+            # 2. Older / regressive interim hypothesis protection:
+            # If the incoming interim has an earlier audio end_time for the same audio window,
+            # or ends before the active interim began, discard it to protect newer hypothesis.
+            is_same_window = abs(self._interim_segment.start_time - segment.start_time) < 1e-4
+            is_same_segment = self._interim_segment.segment_id == segment.segment_id
+            if (is_same_window or is_same_segment) and (segment.end_time < self._interim_segment.end_time):
+                self._record_arrival(
+                    None,
+                    segment=segment,
+                    is_duplicate=False,
+                    was_reordered=True,
+                    is_late_interim=True,
+                    event_id=event_id,
+                )
+                return False
+
+            if segment.end_time <= self._interim_segment.start_time:
+                # Arrived from an audio window prior to active interim onset
+                self._record_arrival(
+                    None,
+                    segment=segment,
+                    is_duplicate=False,
+                    was_reordered=True,
+                    is_late_interim=True,
+                    event_id=event_id,
+                )
+                return False
+
+        # Late Interim Protection against committed final segments:
         # If the interim segment ends before or at the latest committed final segment end_time,
-        # it is a stale/late interim event whose audio span has already been finalized.
+        # or falls entirely within an already finalized segment's span, discard it.
         if self._final_segments:
             max_finalized_end = max(s.end_time for s in self._final_segments)
             if segment.end_time <= max_finalized_end:
@@ -150,6 +215,7 @@ class OrderedSegmentAccumulator:
                     is_duplicate=False,
                     was_reordered=False,
                     is_late_interim=True,
+                    event_id=event_id,
                 )
                 return False
 
@@ -161,6 +227,7 @@ class OrderedSegmentAccumulator:
             is_duplicate=False,
             was_reordered=False,
             is_late_interim=False,
+            event_id=event_id,
         )
         return True
 
@@ -169,7 +236,7 @@ class OrderedSegmentAccumulator:
         # Identity-Based Deduplication (by segment_id)
         if segment.segment_id in self._seen_segment_ids:
             self._duplicates_suppressed += 1
-            self._record_arrival(None, segment=segment, is_duplicate=True, was_reordered=False)
+            self._record_arrival(None, segment=segment, is_duplicate=True, was_reordered=False, event_id=event_id)
             return False
 
         # Content + Boundary Deduplication (exact same audio window and text)
@@ -180,7 +247,7 @@ class OrderedSegmentAccumulator:
                 and existing.text.strip() == segment.text.strip()
             ):
                 self._duplicates_suppressed += 1
-                self._record_arrival(None, segment=segment, is_duplicate=True, was_reordered=False)
+                self._record_arrival(None, segment=segment, is_duplicate=True, was_reordered=False, event_id=event_id)
                 return False
 
         # Determine insertion point by audio start_time (secondary sort by end_time)
@@ -198,12 +265,23 @@ class OrderedSegmentAccumulator:
         self._final_segments.insert(idx, segment)
         self._seen_segment_ids.add(segment.segment_id)
 
-        # Clear active interim if this finalized segment covers or exceeds its audio window
+        # Clear and reconcile active interim if this finalized segment matches, covers, or overlaps its audio window
         if self._interim_segment is not None:
-            if segment.end_time >= self._interim_segment.start_time:
+            is_same_segment = segment.segment_id == self._interim_segment.segment_id
+            overlaps = (
+                segment.start_time < self._interim_segment.end_time
+                and segment.end_time > self._interim_segment.start_time
+            )
+            is_subsumed = (
+                segment.start_time <= self._interim_segment.start_time
+                and segment.end_time >= self._interim_segment.end_time
+            )
+            if is_same_segment or overlaps or is_subsumed:
                 self._interim_segment = None
+                self._active_interim_sequence = None
+                self._active_interim_timestamp = None
 
-        self._record_arrival(None, segment=segment, is_duplicate=False, was_reordered=was_reordered)
+        self._record_arrival(None, segment=segment, is_duplicate=False, was_reordered=was_reordered, event_id=event_id)
         return True
 
     def _record_arrival(
@@ -213,11 +291,12 @@ class OrderedSegmentAccumulator:
         is_duplicate: bool = False,
         was_reordered: bool = False,
         is_late_interim: bool = False,
+        event_id: Optional[str] = None,
     ) -> None:
         """Record diagnostic history of event arrivals."""
         seg = segment or (event.segment if event else None)
         evt_type = event.event_type.value if event else ("final" if (seg and seg.is_final) else "interim")
-        evt_id = event.event_id if event else (seg.segment_id if seg else "none")
+        evt_id = event.event_id if event else (event_id or (seg.segment_id if seg else "none"))
 
         record = {
             "arrival_index": len(self._arrival_history) + 1,
@@ -278,6 +357,8 @@ class OrderedSegmentAccumulator:
         self._seen_segment_ids.clear()
         self._seen_event_ids.clear()
         self._interim_segment = None
+        self._active_interim_sequence = None
+        self._active_interim_timestamp = None
         self._last_error = None
         self._events_processed = 0
         self._interim_updates_count = 0
