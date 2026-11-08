@@ -1,7 +1,9 @@
-# Pull Request: W1 Foundation — Typed Audio Schemas, Deterministic Mock Microphone, and CLI Demo
+# Pull Request: W1 Foundation - Typed Audio Schemas, Deterministic Mock Microphone, and CLI Demo
 
-**Branch:** `feature/w1-audio-foundation` -> `main`  
-**Workstream:** W1 – Audio and VAD  
+**Branch:** AI-Voice-Co-pilot-Version-1 -> main  
+**Pull Request URL:** [Pending PR Creation on GitHub - compare branch: AI-Voice-Co-pilot-Version-1]  
+**Repository:** https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot  
+**Workstream:** W1 - Audio and VAD  
 **Author:** Harshita G Kademani (SDE 3)  
 **Project:** AI Voice Copilot  
 **Status:** Ready for Review  
@@ -242,3 +244,46 @@ Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
 - [x] **Work is on a feature branch (`feature/w1-audio-foundation`); no direct pushes to main**
 - [x] **PR description includes full test output; no secrets/recordings/personal data are committed**
 - [x] **Day 7 demo completed (CLI demonstration verified; optional web visualizer available)**
+
+---
+
+## 5. Week 2 (D8–D14) Audio Pipeline & VAD Addendum
+
+### Architecture & Fixes Delivered:
+1. **Device Adapter (`src/audio/device.py`)**:
+   - AudioDevice interface and deterministic MockAudioDevice.
+   - Observable permission states (`UNKNOWN`, `REQUESTED`, `GRANTED`, `DENIED`, `UNSUPPORTED`).
+   - Default device selection respects `supported=False` (unsupported devices never pre-selected).
+   - Format validation (`INVALID_CHANNELS`, `INVALID_SAMPLE_RATE`) on `open()`.
+   - Continuous permission verification on `read_chunk()`.
+2. **Lifecycle Controller (`src/audio/lifecycle.py`)**:
+   - State progression across `IDLE`, `STARTING`, `RUNNING`, `PAUSED`, `STOPPING`, `STOPPED`, and `ERROR`.
+   - Out-of-order chunks transition controller to `ERROR` and safely close device.
+   - Restart policy: resets sequence tracking to 0, timestamps to -1.0, chunks captured to 0.
+3. **Voice Activity Detection (`src/audio/vad.py`)**:
+   - Rule-based RMS energy mapping with configurable `energy_threshold`, `speech_probability_threshold`, `min_speech_duration_ms`, and `min_silence_duration_ms`.
+   - Mathematical effective energy threshold: `effective_energy = energy_threshold * (1 + 2 * speech_probability_threshold)`.
+   - `SPEECH_START` carries true onset timestamp and `onset_sequence_id` of the first frame in qualification window.
+4. **Bounded Buffer (`src/audio/buffer.py`)**:
+   - Strict FIFO ordering and capacity backpressure (`DROPPED`).
+   - Ordered check policy: Type -> Duplicate (`REJECTED_DUPLICATE`) -> Late (`REJECTED_LATE`) -> Gap -> Capacity -> Enqueue.
+   - Tracks discrete `sequence_gap_events` and cumulative `missing_chunks_total`.
+   - Sliding window memory bounded to 4096 entries.
+5. **Integrated Pipeline Orchestrator (`src/audio/pipeline.py`)**:
+   - Starvation-free buffer drainage in `process_step()`.
+   - `capture_burst(n)` for driving real overflow through device -> lifecycle -> buffer.
+   - Restarts reset buffer, metrics, VAD, and `total_processed_steps`.
+   - Telemetry exposes `last_push_result`.
+6. **Honest Demos (`src/audio/demo.py`, `src/cli_w2.py`)**:
+   - Live computed assertions, PASS/FAIL verification tables, non-zero exit codes on failure.
+   - Clear drop breakdown: 5 drops from overflow burst + 1 gap chunk dropped on full buffer = 6 total dropped.
+
+### Test Execution Summary:
+- **Week 1 Audio Suite (`tests.test_audio_schemas`, `tests.test_audio_errors`, `tests.test_chunker`, `tests.test_mock_source`)**: 45/45 Passed (100%)
+- **Week 2 Audio Suite (`tests.test_audio_device`, `tests.test_audio_lifecycle`, `tests.test_vad`, `tests.test_audio_buffer`, `tests.test_audio_pipeline`)**: 80/80 Passed (100%)
+  * `test_audio_device.py`: 19 tests
+  * `test_audio_lifecycle.py`: 17 tests
+  * `test_vad.py`: 13 tests
+  * `test_audio_buffer.py`: 11 tests
+  * `test_audio_pipeline.py`: 20 tests
+- **Full Repository Suite (`python -m unittest discover tests -v`)**: 183/183 Passed (100%)
