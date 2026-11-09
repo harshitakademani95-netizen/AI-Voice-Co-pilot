@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, MicOff, Volume2, Square, AlertOctagon, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { Mic, MicOff, Volume2, Square, AlertOctagon, CheckCircle2, ShieldAlert, PauseCircle, AlertTriangle } from 'lucide-react';
 import { MicrophonePermissionState, MicrophoneActivityState } from '../../api/types';
 import './MicrophoneControl.css';
 
@@ -29,6 +29,8 @@ export const MicrophoneControl: React.FC<MicrophoneControlProps> = ({
   const getStatusText = (): string => {
     if (permission === 'denied') return 'Microphone Access Blocked';
     if (permission === 'prompt') return 'Permission Required';
+    if (activity === 'paused') return 'Microphone capture paused (Session Paused)';
+    if (activity === 'unavailable') return 'Microphone unavailable';
     if (isMuted) return 'Muted';
     if (activity === 'listening') return 'Listening... Speak clearly';
     if (activity === 'processing') return 'Processing speech...';
@@ -112,18 +114,30 @@ export const MicrophoneControl: React.FC<MicrophoneControlProps> = ({
                 ? 'mic-speaking'
                 : activity === 'processing'
                 ? 'mic-processing'
+                : activity === 'paused'
+                ? 'mic-paused'
+                : activity === 'unavailable'
+                ? 'mic-unavailable'
                 : ''
             }`}
             onClick={activity === 'listening' ? onStopListening : onStartListening}
-            disabled={isMuted}
+            disabled={isMuted || activity === 'paused' || activity === 'unavailable'}
             aria-label={
               activity === 'listening'
                 ? 'Stop listening'
+                : activity === 'paused'
+                ? 'Microphone is paused'
+                : activity === 'unavailable'
+                ? 'Microphone is unavailable'
                 : 'Start listening to voice input'
             }
           >
             {isMuted ? (
               <MicOff size={24} aria-hidden="true" />
+            ) : activity === 'paused' ? (
+              <PauseCircle size={24} aria-hidden="true" />
+            ) : activity === 'unavailable' ? (
+              <AlertTriangle size={24} aria-hidden="true" />
             ) : activity === 'speaking' ? (
               <Volume2 size={24} aria-hidden="true" />
             ) : (

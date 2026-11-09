@@ -26,7 +26,7 @@ export const useSession = (initialSessionId = 'session-001'): UseSessionReturn =
 
   // Duration timer when active
   useEffect(() => {
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
     if (status === 'active') {
       timer = setInterval(() => {
         setDurationSeconds((prev) => prev + 1);

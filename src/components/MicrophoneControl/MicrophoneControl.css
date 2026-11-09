@@ -109,6 +109,18 @@
   color: white;
 }
 
+.mic-paused {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: #f59e0b;
+  color: #fbbf24;
+}
+
+.mic-unavailable {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
 .waveform-container {
   display: flex;
   align-items: center;

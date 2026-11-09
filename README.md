@@ -471,3 +471,14 @@ npm run dev
 ``bash
 npm test
 ``
+
+### Week 2 Frontend & UX Milestones (Days 8-14)
+- **Functional Session Controls**: Pause actually suspends audio capture and prevents duplicate/new events; Resume restores capture state.
+- **Capture Indicators**: Real-time visual and accessible states for microphone (granted, denied, listening, paused, unavailable) and screen context (enabled, disabled, capturing, unavailable).
+- **System Status States**: Loading, Online, Offline, and Error states with retry functionality and accessible announcements.
+- **Interim & Final Transcripts**: Live streaming text marked with INTERIM badge, replaced in place with FINAL transcript upon completion without duplicates.
+- **Transcript Revision History**: Preserves previous transcript versions with timestamp, confidence, and reason; toggleable revision history viewer.
+- **Visual Confidence Meter**: Percentage and progress bar indicator for speech recognition confidence.
+- **Context & Sources Panel**: Workspace application tracking, active window, last updated freshness state, and explicit privacy-first Screen Context ON/OFF switch (OFF by default).
+- **Expanded Test Suite**: 60 automated unit, component, and integration tests (100% passing).
+

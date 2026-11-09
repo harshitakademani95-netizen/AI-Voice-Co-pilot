@@ -12,6 +12,8 @@ export interface UseMicrophoneReturn {
   stopListening: () => void;
   setProcessing: () => void;
   setSpeaking: () => void;
+  setPaused: () => void;
+  setUnavailable: () => void;
   setIdle: () => void;
   interruptAi: () => void;
   simulateAudioInput: (spokenPhrase: string) => Promise<string>;
@@ -58,6 +60,14 @@ export const useMicrophone = (
     setActivity('speaking');
   }, []);
 
+  const setPaused = useCallback(() => {
+    setActivity('paused');
+  }, []);
+
+  const setUnavailable = useCallback(() => {
+    setActivity('unavailable');
+  }, []);
+
   const setIdle = useCallback(() => {
     setActivity('idle');
   }, []);
@@ -97,6 +107,8 @@ export const useMicrophone = (
     stopListening,
     setProcessing,
     setSpeaking,
+    setPaused,
+    setUnavailable,
     setIdle,
     interruptAi,
     simulateAudioInput,

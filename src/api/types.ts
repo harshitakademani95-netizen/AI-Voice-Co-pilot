@@ -135,7 +135,54 @@ export interface HealthResponse {
 
 // Frontend UX Types for Timeline and UI State
 export type MicrophonePermissionState = 'prompt' | 'granted' | 'denied';
-export type MicrophoneActivityState = 'idle' | 'listening' | 'processing' | 'speaking' | 'muted';
+export type MicrophoneActivityState =
+  | 'idle'
+  | 'listening'
+  | 'processing'
+  | 'speaking'
+  | 'muted'
+  | 'paused'
+  | 'unavailable';
+
+export type ApplicationStatusState = 'online' | 'offline' | 'loading' | 'error';
+export type ScreenContextStatus = 'disabled' | 'active' | 'loading' | 'unavailable' | 'denied';
+
+export interface TimelineRevision {
+  revision_number: number;
+  timestamp: string;
+  content: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export type ContextSourceType =
+  | 'user_voice'
+  | 'active_app'
+  | 'screen_context'
+  | 'document_context'
+  | 'conversation_history';
+
+export interface ContextSourceInfo {
+  id: ContextSourceType;
+  label: string;
+  description: string;
+  active: boolean;
+  lastUpdated?: string;
+}
+
+export interface AppContextData {
+  activeApp: string;
+  windowTitle: string;
+  sessionId: string;
+  screenContextEnabled: boolean;
+  screenContextStatus: ScreenContextStatus;
+  lastUpdated: string;
+  freshnessState: 'fresh' | 'stale' | 'loading' | 'unavailable';
+  details?: string;
+  terminalOutput?: string;
+  sources: ContextSourceInfo[];
+  errorMessage?: string;
+}
 
 export type TimelineEventType =
   | 'user_voice'
@@ -155,6 +202,11 @@ export interface TimelineEvent {
   actor: 'user' | 'assistant' | 'context_engine' | 'safety_gate' | 'tool';
   title: string;
   content: string;
+  is_interim?: boolean;
+  is_final?: boolean;
+  segment_id?: string;
+  is_revised?: boolean;
+  revision_history?: TimelineRevision[];
   metadata?: {
     confidence?: number;
     risk_level?: RiskLevel;

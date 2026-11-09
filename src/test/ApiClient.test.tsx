@@ -96,10 +96,11 @@ describe('MockApiClient & Contract Testing', () => {
     try {
       await client.transcribeAudio({ session_id: '' });
       expect.fail('Should have thrown ApiClientError');
-    } catch (err: any) {
+    } catch (err: unknown) {
       expect(err).toBeInstanceOf(ApiClientError);
-      expect(err.code).toBe('INVALID_REQUEST');
-      expect(err.toJSON()).toEqual({
+      const apiErr = err as ApiClientError;
+      expect(apiErr.code).toBe('INVALID_REQUEST');
+      expect(apiErr.toJSON()).toEqual({
         error: {
           code: 'INVALID_REQUEST',
           message: expect.any(String),
@@ -114,9 +115,11 @@ describe('MockApiClient & Contract Testing', () => {
     try {
       await client.checkHealth();
       expect.fail('Should have thrown PERMISSION_DENIED');
-    } catch (err: any) {
-      expect(err.code).toBe('PERMISSION_DENIED');
-      expect(err.statusCode).toBe(403);
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      const apiErr = err as ApiClientError;
+      expect(apiErr.code).toBe('PERMISSION_DENIED');
+      expect(apiErr.statusCode).toBe(403);
     }
   });
 });

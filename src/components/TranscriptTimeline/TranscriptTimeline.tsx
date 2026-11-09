@@ -30,6 +30,7 @@ export const TranscriptTimeline: React.FC<TranscriptTimelineProps> = ({
   const filteredEvents = events.filter((evt) => {
     if (filter === 'all') return true;
     if (filter === 'user_voice') return evt.type === 'user_voice';
+    if (filter === 'interim') return evt.is_interim === true;
     if (filter === 'ai') return evt.type === 'ai_response' || evt.type === 'ai_thought' || evt.type === 'voice_output';
     if (filter === 'context') return evt.type === 'system_context';
     if (filter === 'agent') return evt.type === 'agent_plan' || evt.type === 'tool_execution';
@@ -65,6 +66,7 @@ export const TranscriptTimeline: React.FC<TranscriptTimelineProps> = ({
             >
               <option value="all">All Events</option>
               <option value="user_voice">Voice Inputs</option>
+              <option value="interim">Interim Transcripts</option>
               <option value="ai">AI Responses & Voice</option>
               <option value="context">Context Engine</option>
               <option value="agent">Agent Plans & Tools</option>
