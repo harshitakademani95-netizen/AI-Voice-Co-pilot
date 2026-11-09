@@ -5,6 +5,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from src.app import create_app
+from src.core.idempotency import idempotency_manager
+from src.repositories.approval_repository import approval_repository
 from src.repositories.session_repository import session_repository
 
 try:
@@ -26,10 +28,14 @@ except ImportError:
 
 @pytest.fixture(autouse=True)
 def clean_repository():
-    """Ensures a clean in-memory session repository before each test."""
+    """Ensures a clean in-memory session repository and idempotency store before each test."""
     session_repository.clear()
+    idempotency_manager.clear()
+    approval_repository.clear()
     yield
     session_repository.clear()
+    idempotency_manager.clear()
+    approval_repository.clear()
 
 
 @pytest.fixture

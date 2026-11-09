@@ -156,3 +156,105 @@
   - PR: `feat(w5): Backend foundation, session states, and mock launcher`
 - **Blockers:** None
 - **Next steps:** Hand off vertical slice API to dependent engineering teams (Voice, AI Orchestrator, Desktop UI).
+
+---
+
+## Day 8: Session Lifecycle Enhancement (Pause, Resume, Stop)
+- **Completed work:**
+  - Added `STOPPED` state to `SessionState` enum while preserving existing state enums.
+  - Implemented dedicated pause endpoint `POST /sessions/{id}/pause` emitting `session_paused` event.
+  - Implemented dedicated resume endpoint `POST /sessions/{id}/resume` emitting `session_resumed` event.
+  - Implemented dedicated stop endpoint `POST /sessions/{id}/stop` transitioning active or paused sessions to terminal `stopped` state with `session_stopped` event.
+  - Enforced terminal state rules preventing further state changes or event recordings once stopped.
+- **Files changed:**
+  - `src/models/session.py`
+  - `src/repositories/session_repository.py`
+  - `src/routes/sessions.py`
+- **Blockers:** None
+- **Next steps:** Implement idempotent command handling.
+
+---
+
+## Day 9: Idempotent Command Handling
+- **Completed work:**
+  - Created thread-safe `InMemoryIdempotencyManager` (`src/core/idempotency.py`) with SHA-256 fingerprinting.
+  - Added `Idempotency-Key` and `X-Idempotency-Key` support to all mutating session routes.
+  - Verified exact replay return matching status code and cached response body without duplicate state changes.
+  - Implemented conflict detection returning HTTP 409 `IDEMPOTENCY_CONFLICT` in typed error envelope when key is reused with different request payload.
+- **Files changed:**
+  - `src/core/idempotency.py`
+  - `src/routes/sessions.py`
+  - `tests/conftest.py`
+- **Blockers:** None
+- **Next steps:** Implement Server-Sent Events (SSE) streaming for session lifecycle.
+
+---
+
+## Day 10: Server-Sent Events (SSE) Streaming
+- **Completed work:**
+  - Implemented real-time event pub/sub in `InMemorySessionRepository` with `asyncio.Queue` subscribers.
+  - Added streaming route `GET /sessions/{session_id}/events/stream` returning `text/event-stream`.
+  - Delivered historical events in strict chronological order followed by live broadcast of new events.
+  - Implemented disconnect safety preventing resource leaks on client close.
+- **Files changed:**
+  - `src/repositories/session_repository.py`
+  - `src/routes/sessions.py`
+- **Blockers:** None
+- **Next steps:** Implement payload size limit middleware and startup configuration validation.
+
+---
+
+## Day 11: Request Payload Size Limits & Error Envelope Compliance
+- **Completed work:**
+  - Implemented `PayloadSizeLimitMiddleware` enforcing `MAX_PAYLOAD_SIZE_BYTES` (default 1MB).
+  - Configured immediate rejection with HTTP 413 `PAYLOAD_TOO_LARGE` in typed error envelope.
+  - Verified request validation and compliance with error response schema.
+- **Files changed:**
+  - `src/core/middleware.py`
+  - `src/app.py`
+- **Blockers:** None
+- **Next steps:** Implement startup configuration validation and structured logging.
+
+---
+
+## Day 12: Startup Configuration Validation & Structured Logging
+- **Completed work:**
+  - Added fail-fast configuration validator `validate_configuration()` in `src/config.py`.
+  - Validated port (1-65535), payload limit (>0), session TTL (>0), log level, and environment.
+  - Implemented structured logging in `RequestCorrelationMiddleware` with correlation ID propagation and zero leakage of sensitive data.
+- **Files changed:**
+  - `src/config.py`
+  - `src/core/middleware.py`
+  - `src/app.py`
+- **Blockers:** None
+- **Next steps:** Build comprehensive automated tests and live demonstration.
+
+---
+
+## Day 13: Automated Pytest Suite (Week 2 Coverage)
+- **Completed work:**
+  - Developed `tests/test_sessions_week2.py` covering all Week 2 requirements.
+  - Verified pause, resume, stop, terminal state enforcement, and TTL expiration.
+  - Verified idempotency replay, conflict detection, and independent keys.
+  - Verified SSE streaming format, 404 on missing session, and disconnect handling.
+  - Verified payload size limits (under limit passes, oversized returns 413).
+  - Verified config validation fail-fast behaviors and correlation header propagation.
+- **Files changed:**
+  - `tests/test_sessions_week2.py`
+  - `run_week2_tests.py`
+- **Blockers:** None
+- **Next steps:** Build Week 2 demonstration script and update documentation.
+
+---
+
+## Day 14: Demonstration Script, Swagger Verification & Final Documentation
+- **Completed work:**
+  - Created end-to-end demonstration script `scripts/demo_week2.py` exercising the full lifecycle.
+  - Updated API documentation and OpenAPI schemas in Swagger UI (`/docs`).
+  - Completed `README.md` and verification documentation.
+- **Files changed:**
+  - `scripts/demo_week2.py`
+  - `README.md`
+  - `docs/DAILY_PROGRESS_REPORTS.md`
+- **Blockers:** None
+- **Next steps:** Ready for integration with downstream workstreams.

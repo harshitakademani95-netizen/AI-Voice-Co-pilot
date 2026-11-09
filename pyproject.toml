@@ -26,3 +26,7 @@ pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --strict-markers"
+filterwarnings = [
+    "ignore:.*Using `httpx` with `starlette.testclient` is deprecated.*",
+    "ignore:.*Module already imported so cannot be rewritten.*:pytest.PytestAssertRewriteWarning",
+]

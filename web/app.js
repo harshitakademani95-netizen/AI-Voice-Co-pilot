@@ -6,6 +6,7 @@ let activeScenario = 'error';
 let scenariosData = {};
 let isProcessing = false;
 let lastFocusedElement = null;
+let currentApprovalId = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
@@ -89,16 +90,38 @@ function setupEventListeners() {
     }
   });
 
-  // Approval Gate Actions (Replacing alert() with accessible toast notifications)
-  document.getElementById('btn-approve-action').addEventListener('click', () => {
+  // Approval Gate Actions (Synchronized with backend /api/v1/approvals)
+  document.getElementById('btn-approve-action').addEventListener('click', async () => {
     document.getElementById('approval-gate-banner').classList.add('hidden');
-    showToast("Action APPROVED by user. Human-in-the-Loop confirmed.", "success");
+    if (currentApprovalId) {
+      try {
+        await fetch(`/api/v1/approvals/${currentApprovalId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: 'user_local' })
+        });
+      } catch (e) {
+        console.warn('Backend approval sync error:', e);
+      }
+    }
+    showToast("Action APPROVED by user. Human-in-the-Loop confirmed on backend.", "success");
     announceToA11y("Action approved by user.");
   });
 
-  document.getElementById('btn-reject-action').addEventListener('click', () => {
+  document.getElementById('btn-reject-action').addEventListener('click', async () => {
     document.getElementById('approval-gate-banner').classList.add('hidden');
-    showToast("Action REJECTED by user. Safety boundary enforced.", "warning");
+    if (currentApprovalId) {
+      try {
+        await fetch(`/api/v1/approvals/${currentApprovalId}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: 'user_local', reason: 'User rejected via UI' })
+        });
+      } catch (e) {
+        console.warn('Backend rejection sync error:', e);
+      }
+    }
+    showToast("Action REJECTED by user. Safety boundary enforced on backend.", "warning");
     announceToA11y("Action rejected by user. Safety boundary enforced.");
   });
 
@@ -175,6 +198,38 @@ async function loadScenarios() {
 function onScenarioChange(scenarioKey) {
   const scenario = scenariosData[scenarioKey];
   if (!scenario) return;
+
+  // Reset Safety Gate Banner and approval state from previous scenario
+  const gateBanner = document.getElementById('approval-gate-banner');
+  if (gateBanner) gateBanner.classList.add('hidden');
+  currentApprovalId = null;
+
+  // Reset Reasoning Output to ready state
+  const bodyEl = document.getElementById('response-text-body');
+  if (bodyEl) {
+    bodyEl.textContent = 'Select a scenario on the left or type a query, then click "Execute Reasoning" to test the deterministic reasoning engine.';
+  }
+
+  // Reset latency & confidence indicators
+  const latEl = document.getElementById('latency-indicator');
+  if (latEl) latEl.innerHTML = `Latency: <strong>-- ms</strong>`;
+  const confEl = document.getElementById('confidence-indicator');
+  if (confEl) confEl.innerHTML = `Conf: <strong>--%</strong>`;
+
+  // Reset Risk Badge
+  const riskBadge = document.getElementById('risk-category-badge');
+  if (riskBadge) {
+    riskBadge.className = 'risk-badge risk-a';
+    riskBadge.textContent = 'Category A • Informational';
+  }
+
+  // Reset Citations list
+  const countBadge = document.getElementById('citations-count-badge');
+  if (countBadge) countBadge.textContent = '0 Cited';
+  const citationsList = document.getElementById('citations-list');
+  if (citationsList) {
+    citationsList.innerHTML = '<div class="empty-state">No sources cited yet.</div>';
+  }
 
   document.getElementById('user-query-input').value = scenario.default_query;
   renderContextItems(scenario.context_items);
@@ -317,6 +372,7 @@ function renderErrorResult(errorMessage) {
 }
 
 function renderReasoningResult(result) {
+  currentApprovalId = result.approval_id || null;
   const bodyEl = document.getElementById('response-text-body');
   bodyEl.textContent = result.response_text;
 

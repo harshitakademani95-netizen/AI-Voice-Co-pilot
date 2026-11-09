@@ -395,11 +395,11 @@ Status: ALL TESTS PASSED [OK]
 ---
 ---
 
-# Part 4: Workstream W5 – Backend & Sessions
+# Part 4: Workstream W5 – Backend & Sessions (Week 1 Foundation & Week 2 Session Service)
 
 **Developer**: Vaishnavi G  
 **Workstream**: W5 – Backend and Sessions  
-**Test Suite**: 27 Automated Unit & Route Tests (100% Passing)
+**Test Suite**: 45+ Automated Unit, Route & Lifecycle Tests (100% Passing)
 
 ## 1. Overview & Architecture
 
@@ -422,7 +422,66 @@ etryable, correlation_id, details_redacted) with automatic redaction of sensitiv
 | stopping | completed, ailed | Graceful shutdown in progress. |
 | completed | *None* | Terminal state. |
 | ailed | *None* | Terminal state. |
-| expired | *None* | Terminal state. |
+| `stopped` | *None (Terminal)* | Terminal state. Dedicated stop endpoint. |
+| `completed` | *None (Terminal)* | Terminal state. Clean exit. |
+| `failed` | *None (Terminal)* | Terminal state. Unrecoverable fault. |
+| `expired` | *None (Terminal)* | Terminal state. Idle TTL timeout. |
+
+## 3. Idempotency Specification
+
+Clients perform safe retries of mutating lifecycle actions by supplying the `Idempotency-Key: <UUID>` header (or `X-Idempotency-Key`):
+- **Exact Replay**: Same key and identical payload returns the cached HTTP response and status code without executing duplicate state changes or emitting duplicate events.
+- **Conflicting Key Reuse**: Same key used with a different request body or target endpoint triggers an HTTP 409 `IDEMPOTENCY_CONFLICT` typed error envelope.
+
+## 4. Server-Sent Events (SSE) Specification
+
+Clients subscribe to real-time and historical session lifecycle events via:
+`GET /sessions/{session_id}/events/stream` (or `GET /api/v1/sessions/{session_id}/events/stream`)
+
+- **Format**: `text/event-stream`
+- **Replay**: Chronologically yields all historical session events, then streams live events as they occur.
+- **Resilience**: Safely handles client disconnection and cleans up event queues without memory leaks.
+
+## 5. Request Payload Size Limits & Configuration
+
+- **Payload Size Enforcement**: Default limit of 1MB (`MAX_PAYLOAD_SIZE_BYTES=1048576`). Payloads exceeding this threshold return HTTP 413 `PAYLOAD_TOO_LARGE`.
+- **Fail-Fast Startup Validation**: `validate_configuration()` validates `PORT` (1-65535), `MAX_PAYLOAD_SIZE_BYTES` (>0), `SESSION_TTL_SECONDS` (>0), and `LOG_LEVEL` at boot.
+- **Structured Logging**: Correlation ID propagation (`X-Correlation-ID`) across logs with automated redaction of sensitive credentials and tokens.
+
+## 6. API Endpoints Reference
+
+| Method | Path | Description | Workstream |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health`, `/api/v1/health` | Service vitality and mock mode probe | W5 (Week 1) |
+| `GET` | `/ready`, `/api/v1/ready` | In-memory storage readiness probe | W5 (Week 1) |
+| `POST` | `/sessions`, `/api/v1/sessions` | Create session (supports idempotency) | W5 (Week 1 & 2) |
+| `GET` | `/sessions`, `/api/v1/sessions` | List sessions with optional state filtering | W5 (Week 1) |
+| `GET` | `/sessions/{id}`, `/api/v1/sessions/{id}` | Retrieve session state and audit history | W5 (Week 1) |
+| `POST` | `/sessions/{id}/transition` | Enforced state machine transition | W5 (Week 1 & 2) |
+| `POST` | `/sessions/{id}/pause` | Pause active session (`active` -> `paused`) | W5 (Week 2) |
+| `POST` | `/sessions/{id}/resume` | Resume paused session (`paused` -> `active`) | W5 (Week 2) |
+| `POST` | `/sessions/{id}/stop` | Gracefully stop session (`stopped` terminal) | W5 (Week 2) |
+| `POST` | `/sessions/{id}/events` | Record mock/telemetry event in session | W5 (Week 1) |
+| `GET` | `/sessions/{id}/events`, `/sessions/{id}/events/stream` | Stream historical & live events via SSE | W5 (Week 2) |
+| `POST` | `/sessions/mock/quickstart` | Demo quickstart flow in one call | W5 (Week 1) |
+
+## 7. How to Run & Verify
+
+### One-Command Mock Server Launcher
+```powershell
+python run_mock.py
+```
+Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) in your browser for the Swagger OpenAPI documentation.
+
+### Week 2 Demonstration Script
+```powershell
+python scripts/demo_week2.py
+```
+
+### Week 1 & Week 2 Automated Test Suites
+```powershell
+python run_week2_tests.py
+```
 
 ## 3. How to Run W5 Backend Features
 

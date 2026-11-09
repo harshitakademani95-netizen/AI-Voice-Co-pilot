@@ -44,3 +44,76 @@ def test_middleware_preserves_ids_on_error_responses(client: TestClient):
     data = response.json()
     assert "error" in data
     assert data["error"]["correlation_id"] == corr_id
+
+
+def test_configure_logging_twice_leaves_one_handler():
+    """Task 1.a: Calling configure_logging twice leaves exactly one handler."""
+    import logging
+    from src.core.logging_config import configure_logging
+
+    configure_logging()
+    configure_logging()
+    backend_logger = logging.getLogger("backend")
+    assert len(backend_logger.handlers) == 1
+
+
+def test_get_health_logs_json_line_with_ids(client: TestClient, capsys):
+    """Task 1.b: GET /api/v1/health prints one line that parses as JSON with correlation_id and request_id."""
+    import json
+    from src.core.logging_config import configure_logging
+
+    configure_logging("INFO")
+    capsys.readouterr()
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    out, _ = capsys.readouterr()
+
+    json_lines = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+            if parsed.get("event") == "http_request":
+                json_lines.append(parsed)
+        except json.JSONDecodeError:
+            pass
+
+    assert len(json_lines) >= 1
+    log_entry = json_lines[-1]
+    assert "correlation_id" in log_entry
+    assert "request_id" in log_entry
+    assert log_entry["path"] == "/api/v1/health"
+    assert log_entry["status_code"] == 200
+
+
+def test_request_body_secrets_never_appear_in_log_output(client: TestClient, capsys):
+    """Task 1.c: 'sk-supersecretkey999' sent in a request body never appears in the output."""
+    from src.core.logging_config import configure_logging
+
+    configure_logging("INFO")
+    capsys.readouterr()
+    secret = "sk-supersecretkey999"
+    res = client.post("/api/v1/sessions", json={"secret_token": secret})
+    assert res.status_code == 201
+    out, err = capsys.readouterr()
+
+    assert secret not in out
+    assert secret not in err
+
+
+def test_log_level_warning_suppresses_info_access_line(client: TestClient, capsys):
+    """Task 1.d: LOG_LEVEL=WARNING suppresses the INFO access line."""
+    from src.core.logging_config import configure_logging
+
+    configure_logging("WARNING")
+    try:
+        capsys.readouterr()
+        res = client.get("/api/v1/health")
+        assert res.status_code == 200
+        out, _ = capsys.readouterr()
+        assert "http_request" not in out
+    finally:
+        configure_logging("INFO")
+

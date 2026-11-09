@@ -1,12 +1,21 @@
 """Health and readiness probe route handlers."""
-from fastapi import APIRouter, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request, status
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from src.config import settings
 from src.models.health import HealthResponse, ReadinessResponse
 from src.repositories.session_repository import session_repository
 
 router = APIRouter(tags=["Health & Readiness"])
+
+
+@router.get("/", include_in_schema=False)
+async def root(request: Request):
+    """Redirects browser requests to the UI dashboard and others to Swagger UI."""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return RedirectResponse(url="/ui/")
+    return RedirectResponse(url="/docs")
 
 
 @router.get(

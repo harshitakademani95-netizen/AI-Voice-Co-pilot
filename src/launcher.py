@@ -3,23 +3,21 @@ import os
 import sys
 import uvicorn
 
-from src.config import settings
 
-
-def print_banner():
+def print_banner(cfg):
     banner = f"""
 ================================================================================
-           AI Voice Co-Pilot Backend - W5 Foundation & Sessions
+           AI Voice Co-Pilot Backend - Week 2 Session Service (W5)
 ================================================================================
- Mode:        {'MOCK MODE (Active - No paid credentials needed)' if settings.mock_mode else 'LIVE MODE'}
- Service:     {settings.app_name}
- Version:     {settings.version}
- Environment: {settings.environment}
- Host:        http://{settings.host}:{settings.port}
- API Docs:    http://{settings.host}:{settings.port}/docs
- Health:      http://{settings.host}:{settings.port}/api/v1/health
- Readiness:   http://{settings.host}:{settings.port}/api/v1/ready
- Sessions:    http://{settings.host}:{settings.port}/api/v1/sessions
+ Mode:        {'MOCK MODE (Active - No paid credentials needed)' if cfg.mock_mode else 'LIVE MODE'}
+ Service:     {cfg.app_name}
+ Version:     {cfg.version}
+ Environment: {cfg.environment}
+ Host:        http://{cfg.host}:{cfg.port}
+ API Docs:    http://{cfg.host}:{cfg.port}/docs
+ Health:      http://{cfg.host}:{cfg.port}/api/v1/health
+ Readiness:   http://{cfg.host}:{cfg.port}/api/v1/ready
+ Sessions:    http://{cfg.host}:{cfg.port}/api/v1/sessions
 ================================================================================
 """
     print(banner)
@@ -31,7 +29,14 @@ def main():
     if "MOCK_MODE" not in os.environ:
         os.environ["MOCK_MODE"] = "true"
 
-    print_banner()
+    try:
+        from src.config import settings, validate_configuration
+        validate_configuration(settings)
+    except ValueError as err:
+        print(f"CONFIG ERROR: {err}")
+        sys.exit(1)
+
+    print_banner(settings)
     uvicorn.run(
         "src.app:app",
         host=settings.host,
