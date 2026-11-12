@@ -231,6 +231,11 @@ class TestVersionedPrompts(unittest.TestCase):
         template = DEFAULT_REGISTRY.get("v1.0.0")
         expected_trusted = f"### SYSTEM INSTRUCTIONS (TRUSTED) ###\n{template.trusted_system_instructions.strip()}"
         self.assertIn(expected_trusted, rendered)
+        self.assertEqual(
+            rendered.count("### SYSTEM INSTRUCTIONS (TRUSTED) ###"),
+            1,
+            "Trusted header must appear exactly once"
+        )
 
         # Hostile text must not exist as unescaped raw tag
         self.assertNotIn(hostile_text, rendered)

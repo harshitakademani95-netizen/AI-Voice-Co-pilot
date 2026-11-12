@@ -19,6 +19,7 @@ class TestSyntheticFixtures(unittest.TestCase):
         frame = create_synthetic_screen_frame()
         self.assertFalse(frame.capture_enabled, "Screen capture must be disabled by default")
         self.assertTrue(frame.is_synthetic, "Synthetic frame must have is_synthetic=True")
+        # pyrefly: ignore[bad-argument-type]
         self.assertIn("VS Code", frame.active_application)
         self.assertGreater(frame.width, 0)
         self.assertGreater(frame.height, 0)

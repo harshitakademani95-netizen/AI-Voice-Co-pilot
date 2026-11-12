@@ -93,6 +93,40 @@ RE_SCREEN_QUERY = re.compile(
 )
 
 
+def _format_safe_error_summary(exc: Exception) -> str:
+    """
+    Format a safe, non-echoing, bounded error summary for reason_safe.
+
+    Guarantees:
+    - Never echoes raw input values (extracts error count and field names only).
+    - Hard-bounds string length to <= 10,000 characters, appending '[truncated]' if needed.
+    - Always non-empty.
+    """
+    max_len = 9980
+    try:
+        if hasattr(exc, "errors") and callable(exc.errors):
+            raw_errors = exc.errors()
+            err_count = len(raw_errors)
+            field_names = []
+            seen = set()
+            for err in raw_errors:
+                loc = err.get("loc", ())
+                fld = str(loc[0]) if loc else "root"
+                if fld not in seen:
+                    seen.add(fld)
+                    field_names.append(fld)
+            fields_str = ", ".join(sorted(field_names)) if field_names else "general"
+            summary = f"Validation failed ({err_count} error{'s' if err_count != 1 else ''} in fields: {fields_str})"
+            return summary[:max_len]
+    except Exception:
+        pass
+
+    msg = f"Reasoning failure: {type(exc).__name__}: {str(exc)}"
+    if len(msg) > max_len:
+        msg = msg[:max_len] + "... [truncated]"
+    return msg or "Reasoning failure: unknown error."
+
+
 class MockReasoningEngine:
     """
     Deterministic mock reasoning implementation for Week 1 vertical slice.
@@ -135,18 +169,33 @@ class MockReasoningEngine:
 
             return self.reason(req)
         except Exception as e:
-            return ReasoningResult(
-                request_id=req_id,
-                status="error",
-                response_text=f"Reasoning failure: {str(e)}",
-                sources=[],
-                action_required=False,
-                risk_level=RiskCategory.CATEGORY_A,
-                requires_approval=False,
-                confidence=0.0,
-                latency_ms=0.0,
-                prompt_version="unknown",
-            )
+            safe_text = _format_safe_error_summary(e)
+            try:
+                return ReasoningResult(
+                    request_id=req_id,
+                    status="error",
+                    response_text=safe_text,
+                    sources=[],
+                    action_required=False,
+                    risk_level=RiskCategory.CATEGORY_A,
+                    requires_approval=False,
+                    confidence=0.0,
+                    latency_ms=0.0,
+                    prompt_version="unknown",
+                )
+            except Exception:
+                return ReasoningResult(
+                    request_id="req-unknown",
+                    status="error",
+                    response_text="Reasoning failure: unhandled exception.",
+                    sources=[],
+                    action_required=False,
+                    risk_level=RiskCategory.CATEGORY_A,
+                    requires_approval=False,
+                    confidence=0.0,
+                    latency_ms=0.0,
+                    prompt_version="unknown",
+                )
 
     def reason(self, request: ReasoningRequest) -> ReasoningResult:
         """

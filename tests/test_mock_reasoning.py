@@ -402,6 +402,7 @@ class TestMockReasoning(unittest.TestCase):
         self.assertNotIn("ZeroDivisionError", res.response_text)
         self.assertNotIn("denominator", res.response_text)
         self.assertEqual(res.status, "needs_clarification")
+        self.assertEqual(len(res.sources), 0, "Unrelated query must not cite error context traceback")
 
     def test_query_decides_intent_screen_query_with_error_context(self):
         """
