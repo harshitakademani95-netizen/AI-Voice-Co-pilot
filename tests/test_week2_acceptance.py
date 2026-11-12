@@ -248,9 +248,11 @@ def test_acceptance_05_configuration_validation_and_default_mock_mode(monkeypatc
 # 6. Structured JSON logging, correlation IDs & credential protection
 # ---------------------------------------------------------------------------
 
-def test_acceptance_06_structured_json_logging_and_credential_protection(client: TestClient, caplog: pytest.LogCaptureFixture):
+def test_acceptance_06_structured_json_logging_and_credential_protection(client: TestClient, capsys: pytest.CaptureFixture):
     """Asserts structured JSON logs with correlation ID and zero secret leakage."""
-    caplog.set_level(logging.INFO, logger="backend.structured")
+    from src.core.logging_config import configure_logging
+    configure_logging("INFO")
+    capsys.readouterr()
 
     secret_key = "sk-supersecretkey999"
     secret_pass = "topsecretpassword456"
@@ -262,23 +264,27 @@ def test_acceptance_06_structured_json_logging_and_credential_protection(client:
     )
     assert res.status_code == 201
 
-    # Inspect structured log records
-    records = [r for r in caplog.records if r.name == "backend.structured"]
-    assert len(records) >= 1
+    # Inspect structured log output written to stdout
+    out, err = capsys.readouterr()
+    assert secret_key not in out
+    assert secret_pass not in out
+    assert secret_key not in err
+    assert secret_pass not in err
 
     # Validate JSON structure and correlation ID presence
     found_json = False
-    for rec in records:
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            data = json.loads(rec.message)
-            found_json = True
-            assert "correlation_id" in data
-            assert data["correlation_id"] == "corr-log-test-123"
-            assert "request_id" in data
-            assert "duration_ms" in data
-            # Ensure secrets are NOT in the log line
-            assert secret_key not in rec.message
-            assert secret_pass not in rec.message
+            data = json.loads(line)
+            if data.get("correlation_id") == "corr-log-test-123":
+                found_json = True
+                assert "request_id" in data
+                assert "duration_ms" in data
+                assert secret_key not in line
+                assert secret_pass not in line
         except json.JSONDecodeError:
             pass
 
