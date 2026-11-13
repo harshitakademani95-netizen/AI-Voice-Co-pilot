@@ -190,16 +190,28 @@ def test_10_duplicate_concurrent_commands(client: TestClient):
 
 # 11. Event streaming
 def test_11_event_streaming(client: TestClient):
-    """Verifies SSE event stream endpoint returns text/event-stream with active stream."""
+    """Verifies SSE event stream endpoint returns text/event-stream with active stream and terminates cleanly."""
     c = client.post("/api/v1/sessions").json()["session_id"]
     with client.stream("GET", f"/api/v1/sessions/{c}/events/stream") as stream:
         assert stream.status_code == 200
         assert "text/event-stream" in stream.headers["content-type"]
+        events = []
+        for line in stream.iter_lines():
+            if line and line.startswith("event:"):
+                events.append(line.replace("event:", "").strip())
+                break
+        assert events == ["session_created"]
 
     # Also verify /events streaming
     with client.stream("GET", f"/api/v1/sessions/{c}/events", headers={"Accept": "text/event-stream"}) as stream2:
         assert stream2.status_code == 200
         assert "text/event-stream" in stream2.headers["content-type"]
+        events2 = []
+        for line in stream2.iter_lines():
+            if line and line.startswith("event:"):
+                events2.append(line.replace("event:", "").strip())
+                break
+        assert events2 == ["session_created"]
 
 
 # 12. Event ordering
@@ -209,14 +221,18 @@ def test_12_event_ordering(client: TestClient):
     client.post(f"/api/v1/sessions/{c}/transition", json={"to_state": "active"})
     client.post(f"/api/v1/sessions/{c}/pause")
 
-    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream") as stream:
+    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream?limit=3") as stream:
         event_types = []
+        event_ids = []
         for line in stream.iter_lines():
-            if line and line.startswith("event:"):
-                event_types.append(line.replace("event:", "").strip())
-            if len(event_types) >= 3:
-                break
-        assert event_types[:3] == ["session_created", "session_activated", "session_paused"]
+            if line:
+                if line.startswith("event:"):
+                    event_types.append(line.replace("event:", "").strip())
+                elif line.startswith("id:"):
+                    event_ids.append(line.replace("id:", "").strip())
+        assert event_types == ["session_created", "session_activated", "session_paused"]
+        assert len(event_ids) == 3
+        assert len(set(event_ids)) == 3
 
 
 # Event reconnection & JSON history checks
@@ -232,16 +248,13 @@ def test_event_reconnection_last_event_id(client: TestClient):
 
     # Reconnect asking for events after the first event
     headers = {"Last-Event-ID": created_evt_id, "Accept": "text/event-stream"}
-    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream", headers=headers) as stream:
+    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream?limit=2", headers=headers) as stream:
         reconnected_events = []
         for line in stream.iter_lines():
             if line and line.startswith("event:"):
                 reconnected_events.append(line.replace("event:", "").strip())
-            if len(reconnected_events) >= 2:
-                break
         # First event (session_created) should be skipped
-        assert reconnected_events[0] == "session_activated"
-        assert reconnected_events[1] == "session_paused"
+        assert reconnected_events == ["session_activated", "session_paused"]
 
 
 def test_get_events_json_history_negotiation(client: TestClient):

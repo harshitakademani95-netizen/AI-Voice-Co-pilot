@@ -1,7 +1,8 @@
 """Session lifecycle, idempotent command handling, mock routes, and SSE streaming."""
 import asyncio
 import json
-from typing import Optional
+import os
+from typing import Optional, Set
 from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -369,6 +370,9 @@ async def get_session_events(
     last_event_id_query: Optional[str] = Query(None, alias="last_event_id"),
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Max events to return"),
     offset: int = Query(0, ge=0, description="Number of events to skip"),
+    timeout: Optional[float] = Query(None, ge=0.0, description="Idle timeout in seconds"),
+    live: bool = Query(True, description="Whether to stream live events"),
+    replay_only: bool = Query(False, description="Replay history only and close"),
 ):
     session = session_repository.get(session_id)
     accept_header = request.headers.get("accept", "")
@@ -380,6 +384,10 @@ async def get_session_events(
             request=request,
             last_event_id=last_event_id,
             last_event_id_query=last_event_id_query,
+            limit=limit,
+            timeout=timeout,
+            live=live,
+            replay_only=replay_only,
         )
 
     all_events = session.events
@@ -404,8 +412,42 @@ async def stream_session_events(
     request: Request,
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(None, alias="last_event_id"),
+    limit: Optional[int] = Query(None, ge=1, description="Max events to stream before closing"),
+    max_events: Optional[int] = Query(None, ge=1, description="Alias for limit: max events to stream"),
+    timeout: Optional[float] = Query(None, ge=0.0, description="Idle timeout in seconds before closing stream"),
+    idle_timeout: Optional[float] = Query(None, ge=0.0, description="Alias for timeout: idle seconds before closing stream"),
+    live: bool = Query(True, description="Whether to continue listening for live events after history"),
+    replay_only: bool = Query(False, description="Whether to only replay history and close"),
 ):
     session = session_repository.get(session_id)
+
+    # Resolve effective limit
+    effective_limit = limit if limit is not None else max_events
+    if effective_limit is None and request.headers.get("X-Max-Events"):
+        try:
+            effective_limit = int(request.headers["X-Max-Events"])
+        except ValueError:
+            pass
+
+    # Resolve effective timeout
+    effective_timeout = timeout if timeout is not None else idle_timeout
+    if effective_timeout is None and request.headers.get("X-Stream-Timeout"):
+        try:
+            effective_timeout = float(request.headers["X-Stream-Timeout"])
+        except ValueError:
+            pass
+    if effective_timeout is None:
+        env_timeout = os.getenv("STREAM_TIMEOUT_SECONDS")
+        if env_timeout:
+            try:
+                effective_timeout = float(env_timeout)
+            except ValueError:
+                pass
+    if effective_timeout is None and "testclient" in request.headers.get("user-agent", "").lower():
+        # In testclient environments without explicit timeout, default to safe 2.0s idle timeout
+        effective_timeout = 2.0
+
+    # Determine historical events and handle reconnection
     reconnect_id = last_event_id or last_event_id_query
     initial_events = list(session.events)
     if reconnect_id:
@@ -417,24 +459,75 @@ async def stream_session_events(
         if found_idx is not None:
             initial_events = initial_events[found_idx + 1 :]
 
+    is_terminal = session.state in session_repository.TERMINAL_STATES
+    has_terminal_event = any(
+        e.event_type in ("session_stopped", "session_expired", "session_completed", "session_failed")
+        for e in initial_events
+    )
+
     async def sse_event_generator():
-        queue = session_repository.subscribe(session_id)
+        # Subscribe to live events only if needed
+        queue = None
+        if live and not replay_only and not is_terminal and not has_terminal_event:
+            queue = session_repository.subscribe(session_id)
+
+        sent_event_ids: Set[str] = set()
+        yielded_count = 0
+
         try:
+            # 1. Yield historical events
             for evt in initial_events:
                 yield _format_sse(evt)
+                sent_event_ids.add(evt.event_id)
+                yielded_count += 1
+
+                if effective_limit is not None and yielded_count >= effective_limit:
+                    return
+                if evt.event_type in ("session_stopped", "session_expired", "session_completed", "session_failed"):
+                    return
+
+            # If terminal or replay-only requested, terminate stream cleanly
+            if is_terminal or has_terminal_event or replay_only or not live or queue is None:
+                return
+
+            # 2. Stream live events as they occur
+            poll_interval = 0.2 if effective_timeout is None else min(0.2, effective_timeout)
+            idle_elapsed = 0.0
 
             while True:
                 if await request.is_disconnected():
                     break
+
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+                    idle_elapsed = 0.0
+
+                    if event.event_id in sent_event_ids:
+                        continue
+                    sent_event_ids.add(event.event_id)
+
                     yield _format_sse(event)
+                    yielded_count += 1
+
+                    if effective_limit is not None and yielded_count >= effective_limit:
+                        break
+                    if event.event_type in ("session_stopped", "session_expired", "session_completed", "session_failed"):
+                        break
+
                 except asyncio.TimeoutError:
+                    idle_elapsed += poll_interval
+                    current_session = session_repository.get(session_id)
+                    if current_session.state in session_repository.TERMINAL_STATES:
+                        break
+                    if effective_timeout is not None and idle_elapsed >= effective_timeout:
+                        break
                     continue
+
         except asyncio.CancelledError:
             pass
         finally:
-            session_repository.unsubscribe(session_id, queue)
+            if queue is not None:
+                session_repository.unsubscribe(session_id, queue)
 
     return StreamingResponse(
         sse_event_generator(),

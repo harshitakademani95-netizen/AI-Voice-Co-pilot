@@ -160,15 +160,19 @@ def test_acceptance_03_event_streaming_order_and_reconnection(client: TestClient
     midpoint_event_id = events[1]["event_id"]
     headers = {"Last-Event-ID": midpoint_event_id, "Accept": "text/event-stream"}
     with client.stream("GET", f"/api/v1/sessions/{sid}/events/stream", headers=headers) as stream:
+        assert stream.status_code == 200
         reconnected_events = []
         for line in stream.iter_lines():
             if line and line.startswith("event:"):
                 reconnected_events.append(line.replace("event:", "").strip())
-            if len(reconnected_events) >= 2:
-                break
-        # First event after midpoint should be present
-        assert len(reconnected_events) >= 2
-        assert reconnected_events[0] == events[2]["event_type"]
+
+        # Since session is stopped (terminal), stream replays remaining events and terminates cleanly
+        # Expected remaining events: session_paused (seq 3), session_resumed (seq 4), session_stopped (seq 5)
+        assert len(reconnected_events) == 3
+        assert reconnected_events == ["session_paused", "session_resumed", "session_stopped"]
+        # Ensure earlier events before midpoint were skipped and not duplicated
+        assert "session_created" not in reconnected_events
+        assert "session_activated" not in reconnected_events
 
 
 # ---------------------------------------------------------------------------
