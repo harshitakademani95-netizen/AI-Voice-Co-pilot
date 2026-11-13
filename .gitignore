@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+.env
+.env.*
+.env.local
+
+# Testing and Type Checking
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyrefly/
+
+# Audio / Media Recordings (PR requirement: no secrets/recordings/personal data)
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
+*.webm
+*.png
+*.jpg
+*.mp4
+recordings/
+audio_cache/
+screenshots/
+
+# Logs
+*.log
+
+# Secrets and Configuration
+*.pem
+*.key
+*.token
+credentials.json
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
