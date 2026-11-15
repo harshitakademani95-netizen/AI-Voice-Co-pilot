@@ -70,3 +70,8 @@ credentials.json
 *.swo
 .DS_Store
 Thumbs.db
+
+# Node / Frontend Artifacts
+node_modules/
+.vite/
+dist/
