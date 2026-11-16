@@ -379,11 +379,11 @@ async def get_session_events(
 
     # If client explicitly requests text/event-stream on /events, serve as SSE
     if "text/event-stream" in accept_header:
-        return await stream_session_events(
+        effective_reconnect_id = last_event_id or last_event_id_query
+        return await _stream_session_events_helper(
             session_id=session_id,
             request=request,
-            last_event_id=last_event_id,
-            last_event_id_query=last_event_id_query,
+            last_event_id=effective_reconnect_id,
             limit=limit,
             timeout=timeout,
             live=live,
@@ -402,35 +402,28 @@ async def get_session_events(
     )
 
 
-@router.get(
-    "/{session_id}/events/stream",
-    summary="Stream session events via Server-Sent Events (SSE)",
-    description="Dedicated SSE stream endpoint. Streams historic events in sequence order, then streams real-time events as they occur. Supports reconnection via Last-Event-ID.",
-)
-async def stream_session_events(
+async def _stream_session_events_helper(
     session_id: str,
     request: Request,
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
-    last_event_id_query: Optional[str] = Query(None, alias="last_event_id"),
-    limit: Optional[int] = Query(None, ge=1, description="Max events to stream before closing"),
-    max_events: Optional[int] = Query(None, ge=1, description="Alias for limit: max events to stream"),
-    timeout: Optional[float] = Query(None, ge=0.0, description="Idle timeout in seconds before closing stream"),
-    idle_timeout: Optional[float] = Query(None, ge=0.0, description="Alias for timeout: idle seconds before closing stream"),
-    live: bool = Query(True, description="Whether to continue listening for live events after history"),
-    replay_only: bool = Query(False, description="Whether to only replay history and close"),
-):
+    last_event_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    timeout: Optional[float] = None,
+    live: bool = True,
+    replay_only: bool = False,
+) -> StreamingResponse:
+    """Internal helper for streaming session events via SSE with clean numeric parameters."""
     session = session_repository.get(session_id)
 
-    # Resolve effective limit
-    effective_limit = limit if limit is not None else max_events
+    # Safe numeric limit resolution (guard against Query objects or non-integers)
+    effective_limit: Optional[int] = limit if isinstance(limit, int) else None
     if effective_limit is None and request.headers.get("X-Max-Events"):
         try:
             effective_limit = int(request.headers["X-Max-Events"])
         except ValueError:
             pass
 
-    # Resolve effective timeout
-    effective_timeout = timeout if timeout is not None else idle_timeout
+    # Safe numeric timeout resolution (guard against Query objects or non-numbers)
+    effective_timeout: Optional[float] = float(timeout) if isinstance(timeout, (int, float)) else None
     if effective_timeout is None and request.headers.get("X-Stream-Timeout"):
         try:
             effective_timeout = float(request.headers["X-Stream-Timeout"])
@@ -443,12 +436,9 @@ async def stream_session_events(
                 effective_timeout = float(env_timeout)
             except ValueError:
                 pass
-    if effective_timeout is None and "testclient" in request.headers.get("user-agent", "").lower():
-        # In testclient environments without explicit timeout, default to safe 2.0s idle timeout
-        effective_timeout = 2.0
 
     # Determine historical events and handle reconnection
-    reconnect_id = last_event_id or last_event_id_query
+    reconnect_id = last_event_id if isinstance(last_event_id, str) else None
     initial_events = list(session.events)
     if reconnect_id:
         target = reconnect_id.strip()
@@ -537,6 +527,38 @@ async def stream_session_events(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.get(
+    "/{session_id}/events/stream",
+    summary="Stream session events via Server-Sent Events (SSE)",
+    description="Dedicated SSE stream endpoint. Streams historic events in sequence order, then streams real-time events as they occur. Supports reconnection via Last-Event-ID.",
+)
+async def stream_session_events(
+    session_id: str,
+    request: Request,
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    last_event_id_query: Optional[str] = Query(None, alias="last_event_id"),
+    limit: Optional[int] = Query(None, ge=1, description="Max events to stream before closing"),
+    max_events: Optional[int] = Query(None, ge=1, description="Alias for limit: max events to stream"),
+    timeout: Optional[float] = Query(None, ge=0.0, description="Idle timeout in seconds before closing stream"),
+    idle_timeout: Optional[float] = Query(None, ge=0.0, description="Alias for timeout: idle seconds before closing stream"),
+    live: bool = Query(True, description="Whether to continue listening for live events after history"),
+    replay_only: bool = Query(False, description="Whether to only replay history and close"),
+):
+    effective_last_id = last_event_id or last_event_id_query
+    effective_limit = limit if limit is not None else max_events
+    effective_timeout = timeout if timeout is not None else idle_timeout
+
+    return await _stream_session_events_helper(
+        session_id=session_id,
+        request=request,
+        last_event_id=effective_last_id,
+        limit=effective_limit,
+        timeout=effective_timeout,
+        live=live,
+        replay_only=replay_only,
     )
 
 

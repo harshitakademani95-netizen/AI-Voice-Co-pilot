@@ -410,7 +410,7 @@ etryable, correlation_id, details_redacted) with automatic redaction of sensitiv
 3. **Request & Correlation-ID Middleware**: RequestCorrelationMiddleware ensures every request and response carries X-Request-ID and X-Correlation-ID.
 4. **Session State Machine & In-Memory Repository**: Thread-safe in-memory session engine (InMemorySessionRepository) with strict validation across all 7 lifecycle states: created, ctive, paused, stopping, completed, ailed, and expired.
 5. **One-Command Mock Launcher**: Starts the backend with zero external dependencies (python run_mock.py or .\scripts\run_mock.bat).
-6. **Cross-Team API Contracts**: 6 standardized contracts defined in docs/api-contracts/ (oice.md, context.md, i-chat.md, gent-plan.md, 	ools-execute.md, pprovals.md) and cross-team integration guide in docs/INTEGRATION_GUIDE.md.
+6. **Cross-Team API Contracts**: 6 standardized contracts defined in docs/api-contracts/ (oice.md, context.md, i-chat.md, gent-plan.md, 	ools-execute.md, pprovals.md) and cross-team integration guide in docs/archive/INTEGRATION_GUIDE.md.
 
 ## 2. Session Lifecycle States
 

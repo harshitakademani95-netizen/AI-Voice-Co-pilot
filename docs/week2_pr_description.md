@@ -27,7 +27,7 @@ All 16 Week 2 acceptance criteria are fully implemented and verified with automa
 | **11** | **Structured JSON logging** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_20_structured_logging_without_sensitive_data` | **PASS** |
 | **12** | **Correlation IDs** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_19_correlation_id_generation_and_propagation` | **PASS** |
 | **13** | **Sensitive data protection** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_redact_sensitive_data_keys` | **PASS** |
-| **14** | **Automated API tests** | `test_week2_acceptance.py` (7 tests)<br>`test_sessions_week2.py` (30 tests)<br>`test_sessions.py` (14 tests) | **PASS** |
+| **14** | **Automated API tests** | `test_week2_acceptance.py` (7 tests)<br>`test_sessions_week2.py` (41 tests)<br>`test_middleware.py` (7 tests)<br>`test_sessions.py` (14 tests) | **PASS** |
 | **15** | **Week 1 compatibility** | `test_twenty_requirements.py` (20 tests)<br>`test_accumulator.py` (9 tests)<br>`test_chunker.py` (9 tests)<br>`test_prompts.py` (9 tests) | **PASS** |
 | **16** | **Schema & endpoint review** | `test_acceptance_07_no_duplicate_pydantic_schemas`<br>`test_typed_error_envelope_structure` | **PASS** |
 
@@ -42,13 +42,13 @@ python -m pytest -v
 
 Summary:
 ```
-============================= 244 passed in 4.48s =============================
+============================= 259 passed in 4.14s =============================
 ```
-- **Total Tests**: `244`
-- **Passed**: `244` (100% pass rate)
+- **Total Tests**: `259`
+- **Passed**: `259` (100% pass rate)
 - **Failed**: `0`
 - **Warnings**: `0` (Clean run; StarletteDeprecationWarning filtered via `pyproject.toml`)
-- **Execution Time**: `4.48s`
+- **Execution Time**: `4.14s`
 
 ---
 
