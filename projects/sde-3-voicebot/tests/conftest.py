@@ -5,6 +5,9 @@ import pytest
 from starlette.testclient import TestClient
 
 from src.app import create_app
+from src.core.idempotency import idempotency_manager
+from src.core.security import rate_limiter
+from src.repositories.approval_repository import approval_repository
 from src.repositories.session_repository import session_repository
 
 try:
@@ -25,11 +28,40 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
+def short_stream_timeout(request, monkeypatch):
+    """Sets short STREAM_TIMEOUT_SECONDS for Week 2 streaming tests so idle streams close promptly."""
+    fspath = getattr(request.node, "fspath", None)
+    test_path = str(fspath) if fspath else ""
+    if "week2" in test_path or "sessions" in test_path:
+        monkeypatch.setenv("STREAM_TIMEOUT_SECONDS", "1")
+
+
+@pytest.fixture(autouse=True)
 def clean_repository():
-    """Ensures a clean in-memory session repository before each test."""
+    """Ensures clean in-memory repositories, idempotency, rate limiters and gateway singletons before each test."""
     session_repository.clear()
+    idempotency_manager.clear()
+    approval_repository.clear()
+    rate_limiter.reset()
+    try:
+        from src.gateways import service as gw_service_mod
+        from src.gateways import workflow_gateway as wf_gw_mod
+        gw_service_mod._gateway_service_instance = None
+        wf_gw_mod._workflow_gateway_instance = None
+    except ImportError:
+        pass
     yield
     session_repository.clear()
+    idempotency_manager.clear()
+    approval_repository.clear()
+    rate_limiter.reset()
+    try:
+        from src.gateways import service as gw_service_mod
+        from src.gateways import workflow_gateway as wf_gw_mod
+        gw_service_mod._gateway_service_instance = None
+        wf_gw_mod._workflow_gateway_instance = None
+    except ImportError:
+        pass
 
 
 @pytest.fixture

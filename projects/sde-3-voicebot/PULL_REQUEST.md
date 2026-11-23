@@ -287,3 +287,34 @@ Workstream: W1 - Audio and VAD | Student: Harshita G Kademani (SDE 3)
   * `test_audio_buffer.py`: 11 tests
   * `test_audio_pipeline.py`: 20 tests
 - **Full Repository Suite (`python -m unittest discover tests -v`)**: 183/183 Passed (100%)
+
+
+---
+
+## 6. Week 3 (D15–D21) Backend Gateway Integration, SSE Replay & Full Pipeline Addendum
+
+### Architecture & Deliverables:
+1. **Four Module Gateways (`src/gateways/`)**:
+   - `AudioGateway`: Connects backend to Audio Module with chunking, timeouts, circuit breaker (5 failures, 30s recovery), and retry with backoff.
+   - `TranscriptionGateway`: Connects backend to STT module, supporting both Deepgram live streaming and deterministic mock transcriber.
+   - `ReasoningGateway`: Connects backend to Context & Reasoning engine, assembling context fixtures, building versioned prompts, and classifying intents.
+   - `WorkflowGateway`: Connects backend to Agentic Workflow tools and evaluates policy for human approval gates.
+   - `BackendGatewayService`: Central hub coordinating all 4 gateways with atomic session event logging.
+2. **Unified Pipeline Endpoint (`POST /api/v1/gateways/pipeline/process`)**:
+   - Executes end-to-end flow: Audio $\to$ Transcription $\to$ Reasoning $\to$ Workflow Policy $\to$ Approval Gate.
+   - Demonstrates category C/D actions pausing for user approval before tool execution.
+3. **Event History, Replay & SSE Reconnection**:
+   - Monotonic sequence numbers (1, 2, 3...) and unique event IDs (`evt-<uuid>`).
+   - Slices event history from `Last-Event-ID` or `cursor` query with zero duplicates and zero missing events.
+   - Deterministic stream termination via `limit`, `max_events`, `timeout`, terminal state short-circuit, and `replay_only` mode.
+4. **Local Authorization & Rate Limiting**:
+   - `LocalAuthorizationMiddleware` restricts backend requests to permitted local addresses and API keys.
+   - `RateLimitMiddleware` enforces request limits and returns HTTP 429 `RATE_LIMIT_EXCEEDED` with `Retry-After`.
+5. **Health Aggregation & ID Propagation**:
+   - Multi-module health aggregation on `GET /health` and `GET /ready` checking audio, transcription, reasoning, and workflow sub-modules.
+   - Correlation IDs (`X-Correlation-ID`) and Session IDs propagated across all gateways, logs, and events.
+
+### Test Execution Summary:
+- **Full Backend & Integration Test Suite (`python -m pytest tests/ -q`)**: **534/534 Passed in 5.49s** (100% Passing, 0 Failures, 0 Skipped across 30 test files)
+- **Target SSE Reconnection Tests**: 3/3 Passed in 0.17s without hanging
+- **Week 3 Full Integration Suite (`tests/test_week3_full_integration.py`)**: 36/36 Passed

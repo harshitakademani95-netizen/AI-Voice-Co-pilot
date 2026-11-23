@@ -268,3 +268,120 @@
 - **Demo Drop Breakdown Note:**
   - `capture_burst(15)` on buffer capacity 10 accepts 10 and explicitly drops 5 chunks.
   - When the gap chunk is pushed to the full buffer, it is also dropped, totaling 6 drops (5 from overflow burst + 1 gap chunk on full buffer).
+
+
+---
+
+### Day 15: Audio and Transcription Gateway Integration
+- **Completed work:**
+  - Implemented `AudioGateway` in `src/gateways/audio_gateway.py` connecting the backend to the audio module with bounded timeouts, format validation, chunking, and CircuitBreaker resilience (5 failures threshold, 30s recovery).
+  - Implemented `TranscriptionGateway` in `src/gateways/transcription_gateway.py` with multi-format audio normalization, OrderedSegmentAccumulator, Deepgram API adapter, and fallback DeterministicFakeTranscriber.
+  - Built `BackendGatewayService` in `src/gateways/service.py` to coordinate session creation, audio ingestion, live transcription, and event persistence.
+  - Implemented gateway router endpoints in `src/routes/gateways.py`.
+- **Files changed:**
+  - `src/gateways/audio_gateway.py` (new)
+  - `src/gateways/transcription_gateway.py` (new)
+  - `src/gateways/resilience.py` (new)
+  - `src/gateways/service.py` (new)
+  - `src/routes/gateways.py` (new)
+  - `src/voice_stt/deepgram_adapter.py` (new)
+  - `src/voice_stt/provider_factory.py` (new)
+- **Tests run:**
+  - `python -m pytest tests/test_gateways.py tests/test_day15_verified_integrations.py -v` -> 52/52 passed.
+- **Blockers:** None.
+
+---
+
+### Day 16: Reasoning and Workflow Gateway Integration
+- **Completed work:**
+  - Implemented `ReasoningGateway` in `src/gateways/reasoning_gateway.py` connecting to `MockReasoningEngine`, assembling context items, versioned prompts, and classifying intents.
+  - Implemented `WorkflowGateway` in `src/gateways/workflow_gateway.py` connecting to agentic workflow tools, evaluating policies, and determining approval requirements.
+  - Added Human-in-the-Loop approval repository in `src/repositories/approval_repository.py` and routes in `src/routes/approvals.py`.
+- **Files changed:**
+  - `src/gateways/reasoning_gateway.py` (new)
+  - `src/gateways/workflow_gateway.py` (new)
+  - `src/repositories/approval_repository.py` (new)
+  - `src/routes/approvals.py` (new)
+  - `src/routes/reasoning.py` (new)
+- **Tests run:**
+  - `python -m pytest tests/test_day15_three_pending_integrations.py tests/test_day15_hardening.py -v` -> 39/39 passed.
+- **Blockers:** None.
+
+---
+
+### Day 17: Event History and Persistence
+- **Completed work:**
+  - Implemented event persistence in `SessionRepository` with monotonic integer sequence numbers, unique event IDs, timestamps, and correlation IDs.
+  - Supported pagination (`limit`, `offset`) and event type validation on `GET /api/v1/sessions/{session_id}/events`.
+  - Guaranteed event sequence integrity without duplicate sequence numbers or silent event loss.
+- **Files changed:**
+  - `src/repositories/session_repository.py`
+  - `src/routes/sessions.py`
+- **Tests run:**
+  - `python -m pytest tests/test_sessions.py tests/test_sessions_week2.py -v` -> 55/55 passed.
+- **Blockers:** None.
+
+---
+
+### Day 18: Event Replay and SSE Reconnection
+- **Completed work:**
+  - Implemented Server-Sent Events (SSE) streaming on `GET /api/v1/sessions/{session_id}/events/stream` and `GET /events` (`Accept: text/event-stream`).
+  - Implemented sequence cursor replay and `Last-Event-ID` reconnection slicing past the specified event.
+  - Fixed infinite test hangs with `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0`, query limits (`limit`, `max_events`), terminal state short-circuiting, and `replay_only` mode.
+  - Added periodic disconnect checks (`await request.is_disconnected()`) and queue unregistration in `finally`.
+- **Files changed:**
+  - `src/routes/sessions.py`
+  - `tests/conftest.py`
+  - `tests/test_sessions_week2.py`
+- **Tests run:**
+  - `python -m pytest tests/test_sessions_week2.py::test_11_event_streaming tests/test_sessions_week2.py::test_12_event_ordering tests/test_week2_acceptance.py::test_acceptance_03_event_streaming_order_and_reconnection -v` -> 3/3 passed in 0.17s.
+- **Blockers:** None.
+
+---
+
+### Day 19: Local Authorization Boundary and Rate Limiting
+- **Completed work:**
+  - Implemented `LocalAuthorizationMiddleware` in `src/core/middleware.py` verifying client IP locality and API authorization headers, rejecting unauthorized external requests with HTTP 401/403.
+  - Implemented `RateLimitMiddleware` in `src/core/middleware.py` and token bucket limiter in `src/core/security.py`, enforcing per-client request limits and returning HTTP 429 `RATE_LIMIT_EXCEEDED` with `Retry-After` header.
+  - Protected session and gateway endpoints against abusive requests.
+- **Files changed:**
+  - `src/core/middleware.py`
+  - `src/core/security.py`
+  - `src/core/errors.py`
+- **Tests run:**
+  - `python -m pytest tests/test_middleware.py tests/test_week3_full_integration.py -k "auth or rate_limit" -v` -> All passed.
+- **Blockers:** None.
+
+---
+
+### Day 20: Health Aggregation and ID Propagation
+- **Completed work:**
+  - Implemented multi-module health aggregation in `src/routes/health.py` checking status of Audio, Transcription, Reasoning, and Workflow sub-modules.
+  - `/ready` returns HTTP 200 when all modules are healthy, and degrades to HTTP 503 `not_ready` if any individual sub-module fails.
+  - Implemented request and correlation ID propagation (`X-Correlation-ID`, `X-Request-ID`) across all gateway calls, event logs, and typed error responses.
+- **Files changed:**
+  - `src/routes/health.py`
+  - `src/gateways/service.py`
+  - `src/core/middleware.py`
+- **Tests run:**
+  - `python -m pytest tests/test_health.py tests/test_week3_full_integration.py -k "health or correlation" -v` -> All passed.
+- **Blockers:** None.
+
+---
+
+### Day 21: Integration Tests, Pull Request and Complete Demonstration
+- **Completed work:**
+  - Implemented unified pipeline endpoint `POST /api/v1/gateways/pipeline/process` executing Audio $\to$ Transcription $\to$ Reasoning $\to$ Workflow $\to$ Approval Gate.
+  - Verified Human-in-the-Loop approval gate: Category C/D high-risk actions halt and await manual approval before tool execution.
+  - Built comprehensive integration test suite `tests/test_week3_full_integration.py` (36 tests).
+  - Executed full project test suite: all 534 tests pass cleanly in 5.49s (0 failed, 0 errors, 0 skipped).
+  - Updated API contracts in `docs/api-contracts/gateways.md` and prepared pull request documentation.
+- **Files changed:**
+  - `src/routes/gateways.py`
+  - `tests/test_week3_full_integration.py`
+  - `docs/api-contracts/gateways.md`
+  - `DAILY_PROGRESS_REPORT.md`
+  - `PULL_REQUEST.md`
+- **Tests run:**
+  - `python -m pytest tests/ -q` -> 534 passed in 5.49s.
+- **Blockers:** None.

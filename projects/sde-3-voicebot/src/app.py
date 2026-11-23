@@ -1,32 +1,61 @@
-"""FastAPI Application factory and configuration."""
+"""FastAPI Application factory, lifecycle validation, and route configuration."""
+import os
+from pathlib import Path
+import sys
+
+# Ensure src root is in sys.path for submodule resolution
+_current_dir = Path(__file__).resolve().parent
+_project_root = _current_dir.parent
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.config import settings
+from src.config import settings, validate_configuration
 from src.core.errors import AppError
+from src.core.logging_config import configure_logging
 from src.core.middleware import (
+    LocalAuthorizationMiddleware,
+    PayloadSizeLimitMiddleware,
+    RateLimitMiddleware,
     RequestCorrelationMiddleware,
     app_error_handler,
     handle_unhandled_exception,
     http_exception_handler,
     validation_exception_handler,
 )
+from src.routes.approvals import router as approvals_router
+from src.routes.gateways import router as gateways_router
 from src.routes.health import router as health_router
+from src.routes.reasoning import router as reasoning_router
 from src.routes.sessions import router as sessions_router
 
 
 def create_app() -> FastAPI:
     """Builds and configures the FastAPI application instance."""
+    # Configure structured logging
+    configure_logging()
+
+    # Validate startup configuration (fail fast)
+    validate_configuration(settings)
+
     app = FastAPI(
         title=settings.app_name,
         version=settings.version,
-        description="AI Voice Co-Pilot Backend & Session Management (W5 Workstream)",
+        description="AI Voice Co-Pilot Backend & Full Week 3 Gateways Integration",
         docs_url="/docs",
         redoc_url="/redoc",
     )
 
-    # 1. Register Request and Correlation ID middleware
+    # 1. Register Middlewares (LIFO order: RequestCorrelationMiddleware runs first)
+    app.add_middleware(PayloadSizeLimitMiddleware)
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(LocalAuthorizationMiddleware)
     app.add_middleware(RequestCorrelationMiddleware)
 
     # 2. Register exception handlers for typed error envelopes
@@ -43,6 +72,22 @@ def create_app() -> FastAPI:
     # Session routes
     app.include_router(sessions_router)
     app.include_router(sessions_router, prefix=settings.api_prefix)
+
+    # Reasoning and Interactive Dashboard routes
+    app.include_router(reasoning_router)
+
+    # Approvals & Tool Safety Gate routes
+    app.include_router(approvals_router)
+    app.include_router(approvals_router, prefix=settings.api_prefix)
+
+    # Audio, Transcription, Reasoning & Workflow Gateways and Full Pipeline
+    app.include_router(gateways_router)
+    app.include_router(gateways_router, prefix=settings.api_prefix)
+
+    # 4. Mount frontend web dashboard if available
+    web_dir = _project_root / "web"
+    if web_dir.exists():
+        app.mount("/ui", StaticFiles(directory=str(web_dir), html=True), name="ui")
 
     return app
 

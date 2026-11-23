@@ -12,6 +12,7 @@ class SessionState(str, Enum):
     ACTIVE = "active"
     PAUSED = "paused"
     STOPPING = "stopping"
+    STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
     EXPIRED = "expired"
@@ -23,7 +24,10 @@ class SessionEvent(BaseModel):
         default_factory=lambda: f"evt-{uuid.uuid4().hex[:10]}",
         description="Unique event ID",
     )
-    event_type: str = Field(..., description="Type of event, e.g. mock_voice_transcript, state_change")
+    event_type: str = Field(..., description="Type of event, e.g. session_created, state_change")
+    session_id: Optional[str] = Field(default=None, description="Session ID associated with event")
+    correlation_id: Optional[str] = Field(default=None, description="Correlation ID for traceability")
+    sequence_number: int = Field(default=1, description="Strict incremental sequence number within session")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Event data")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
@@ -42,6 +46,10 @@ class Session(BaseModel):
     updated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="Session last update timestamp",
+    )
+    expires_at: Optional[str] = Field(
+        default=None,
+        description="Session calculated expiration timestamp based on TTL",
     )
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom contextual metadata")
     events: List[SessionEvent] = Field(default_factory=list, description="Ordered audit/mock event stream")
@@ -68,9 +76,38 @@ class SessionTransitionRequest(BaseModel):
     )
 
 
+class SessionPauseRequest(BaseModel):
+    """Request schema to pause an active session."""
+    reason: Optional[str] = Field(
+        default="User paused session",
+        description="Reason for pausing the session",
+    )
+
+
+class SessionResumeRequest(BaseModel):
+    """Request schema to resume a paused session."""
+    reason: Optional[str] = Field(
+        default="User resumed session",
+        description="Reason for resuming the session",
+    )
+
+
+class SessionStopRequest(BaseModel):
+    """Request schema to gracefully stop a session."""
+    reason: Optional[str] = Field(
+        default="User stopped session",
+        description="Reason for stopping the session",
+    )
+
+
 class SessionEventCreateRequest(BaseModel):
     """Request schema to push a mock event into a session."""
-    event_type: str = Field(..., description="Type of mock event (e.g., voice_input, agent_plan)")
+    event_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Type of mock event (e.g., voice_input, agent_plan)",
+    )
     payload: Dict[str, Any] = Field(default_factory=dict, description="Payload data for the event")
 
 
@@ -80,6 +117,7 @@ class SessionResponse(BaseModel):
     state: SessionState
     created_at: str
     updated_at: str
+    expires_at: Optional[str] = None
     metadata: Dict[str, Any]
     events_count: int
     events: List[SessionEvent]
@@ -89,3 +127,10 @@ class SessionListResponse(BaseModel):
     """API response schema for session listings."""
     total: int
     sessions: List[SessionResponse]
+
+
+class SessionEventsResponse(BaseModel):
+    """API response schema for session event retrieval."""
+    session_id: str
+    events_count: int
+    events: List[SessionEvent]
