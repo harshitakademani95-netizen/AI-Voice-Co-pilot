@@ -322,14 +322,21 @@ class InMemorySessionRepository:
         event_type: str,
         payload: Optional[Dict[str, Any]] = None,
         correlation_id: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> SessionEvent:
-        """Adds an event to an active session."""
+        """Adds an event to an active session with duplicate prevention."""
         with self._lock:
             if session_id not in self._sessions:
                 raise SessionNotFoundError(session_id)
 
             session = self._sessions[session_id]
             self._check_ttl_unlocked(session)
+
+            # Prevent duplicate event storage if event_id is supplied and already recorded
+            if event_id:
+                existing = next((e for e in session.events if e.event_id == event_id), None)
+                if existing is not None:
+                    return existing.model_copy(deep=True)
 
             if session.state in self.TERMINAL_STATES:
                 raise InvalidStateTransitionError(
@@ -340,19 +347,56 @@ class InMemorySessionRepository:
 
             now_dt = datetime.now(timezone.utc)
             now_iso = now_dt.isoformat()
-            event = SessionEvent(
-                event_type=event_type,
-                session_id=session_id,
-                correlation_id=correlation_id,
-                sequence_number=len(session.events) + 1,
-                payload=payload or {},
-                timestamp=now_iso,
-            )
+            event_kwargs = {
+                "event_type": event_type,
+                "session_id": session_id,
+                "correlation_id": correlation_id,
+                "sequence_number": len(session.events) + 1,
+                "payload": payload or {},
+                "timestamp": now_iso,
+            }
+            if event_id:
+                event_kwargs["event_id"] = event_id
+
+            event = SessionEvent(**event_kwargs)
             session.events.append(event)
             session.updated_at = now_iso
             session.expires_at = (now_dt + timedelta(seconds=settings.session_ttl_seconds)).isoformat()
             self._dispatch_event_unlocked(session_id, event)
             return event.model_copy(deep=True)
+
+    def replay_events(
+        self,
+        session_id: str,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[SessionEvent]:
+        """Retrieves ordered event history starting after an event ID or sequence cursor."""
+        with self._lock:
+            if session_id not in self._sessions:
+                raise SessionNotFoundError(session_id)
+            session = self._sessions[session_id]
+            self._check_ttl_unlocked(session)
+
+            events = list(session.events)
+            if not cursor:
+                sliced = events
+            else:
+                target = cursor.strip()
+                found_idx = next(
+                    (i for i, ev in enumerate(events) if ev.event_id == target or str(ev.sequence_number) == target),
+                    None,
+                )
+                if found_idx is None:
+                    raise SessionValidationError(
+                        message=f"Invalid replay cursor: '{cursor}'. Event ID or sequence not found.",
+                        details={"cursor": cursor, "session_id": session_id},
+                    )
+                sliced = events[found_idx + 1 :]
+
+            if limit is not None and limit > 0:
+                sliced = sliced[:limit]
+            return [e.model_copy(deep=True) for e in sliced]
 
     def _dispatch_event_unlocked(self, session_id: str, event: SessionEvent) -> None:
         """Broadcasts an event to all active SSE queues for this session."""

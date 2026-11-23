@@ -497,6 +497,28 @@ python scripts/demo_day7.py
 `
 
 ### Running Backend Unit & Route Tests
-`powershell
-python -m pytest tests/test_health.py tests/test_middleware.py tests/test_errors.py tests/test_sessions.py -v
-`
+```powershell
+python -m pytest -q
+```
+
+---
+
+## 8. Week 3 Day 15 Backend Gateways & Hardening
+
+Week 3 Day 15 introduces resilient backend gateways connecting audio chunking and speech-to-text transcription to session pipelines:
+
+### Configuration Options (.env)
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `MAX_AUDIO_BYTES` | Integer | `1000000` | Maximum raw audio payload size in bytes (enforces HTTP 413 `PayloadTooLargeError` on oversized audio). |
+| `MAX_CHUNKS_PER_REQUEST` | Integer | `500` | Maximum chunk count allowed per audio request (enforces HTTP 413 `PayloadTooLargeError`). |
+| `STT_PROVIDER` | String | `mock` | Pluggable Speech-to-Text provider engine: `mock` (deterministic fake offline) or `deepgram` (real cloud STT). |
+| `DEEPGRAM_API_KEY` | String | (empty) | API key for Deepgram Nova-2 speech-to-text (required only if `STT_PROVIDER=deepgram`). |
+
+### Key Gateways & Endpoints
+- `GET /gateways/status` (and `/api/v1/gateways/status`): Real-time gateway status, circuit breaker states, and telemetry.
+- `POST /audio/process` (and `/api/v1/audio/process`): Validates and chunks raw PCM audio with bounded ThreadPoolExecutor timeout.
+- `POST /transcription/process` (and `/api/v1/transcription/process`): Transcribes audio chunks with retry and circuit breaker protection.
+- `POST /sessions/{id}/audio` (and `/api/v1/sessions/{id}/audio`): End-to-end audio ingestion, chunking, transcription, and session event recording.
+- `GET /sessions/{id}/transcript` (and `/api/v1/sessions/{id}/transcript`): Retrieves aggregated transcripts and ordered segments for a session.
+

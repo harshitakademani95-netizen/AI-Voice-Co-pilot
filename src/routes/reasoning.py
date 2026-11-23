@@ -167,6 +167,12 @@ async def preview_prompt(body: WebPromptPreviewRequest):
 
 def _run_test_suite_sync(tests_dir: str):
     """Executes the complete pytest test suite in a worker thread and gathers accurate statistics."""
+    project_root = os.path.dirname(tests_dir)
+    src_dir = os.path.join(project_root, "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     try:
         import pytest
         from contextlib import redirect_stdout, redirect_stderr
@@ -177,6 +183,7 @@ def _run_test_suite_sync(tests_dir: str):
                 self.failed = 0
                 self.skipped = 0
                 self.errors = 0
+                self.failures_list = []
 
             def pytest_runtest_logreport(self, report):
                 if report.when == "call":
@@ -184,27 +191,50 @@ def _run_test_suite_sync(tests_dir: str):
                         self.passed += 1
                     elif report.failed:
                         self.failed += 1
+                        self.failures_list.append(f"FAILED {report.nodeid}: {report.longreprtext or str(report.longrepr)}")
                     elif report.skipped:
                         self.skipped += 1
                 elif report.failed and report.when in ("setup", "teardown"):
                     self.errors += 1
+                    self.failures_list.append(f"ERROR ({report.when}) {report.nodeid}: {report.longreprtext or str(report.longrepr)}")
+
+        from src.core.security import rate_limiter
+        from src.repositories.session_repository import session_repository
+        from src.repositories.approval_repository import approval_repository
+        from src.gateways import service as gw_service_mod
+        from src.gateways import workflow_gateway as wf_gw_mod
+        gw_service_mod._gateway_service_instance = None
+        wf_gw_mod._workflow_gateway_instance = None
+        rate_limiter.reset()
+        session_repository.clear()
+        approval_repository.clear()
 
         collector = _PytestStatCollector()
         stream = io.StringIO()
         start = time.time()
-        with redirect_stdout(stream), redirect_stderr(stream):
-            pytest.main(["-q", "--no-header", "--tb=line", tests_dir], plugins=[collector])
+        try:
+            with redirect_stdout(stream), redirect_stderr(stream):
+                pytest.main(["-q", "--no-header", "--tb=line", tests_dir], plugins=[collector])
+        finally:
+            rate_limiter.reset()
+            session_repository.clear()
+            approval_repository.clear()
+            gw_service_mod._gateway_service_instance = None
+            wf_gw_mod._workflow_gateway_instance = None
         elapsed = round(time.time() - start, 3)
         total = collector.passed + collector.failed + collector.errors
         failures = collector.failed + collector.errors
 
         if total > 0:
+            log_output = stream.getvalue()
+            if collector.failures_list:
+                log_output += "\n\nFailures Detail:\n" + "\n".join(collector.failures_list)
             return {
                 "total": total,
                 "passed": collector.passed,
                 "failures": failures,
                 "duration": elapsed,
-                "log": stream.getvalue(),
+                "log": log_output,
             }
     except Exception:
         pass

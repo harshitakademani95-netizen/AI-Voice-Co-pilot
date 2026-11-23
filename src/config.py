@@ -1,6 +1,6 @@
 """Application configuration, environment settings, and startup validation."""
 import os
-from typing import Set
+from typing import Optional, Set
 from pydantic import BaseModel, Field
 
 
@@ -53,6 +53,22 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     )
+    max_audio_bytes: int = Field(
+        default_factory=lambda: read_int_env("MAX_AUDIO_BYTES", 1000000),
+        description="Maximum permitted audio bytes per request (default 1,000,000 bytes)",
+    )
+    max_chunks_per_request: int = Field(
+        default_factory=lambda: read_int_env("MAX_CHUNKS_PER_REQUEST", 500),
+        description="Maximum permitted audio chunks per request (default 500)",
+    )
+    stt_provider: str = Field(
+        default_factory=lambda: os.getenv("STT_PROVIDER", "mock").strip().lower(),
+        description="Pluggable STT provider ('mock' or 'deepgram')",
+    )
+    deepgram_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("DEEPGRAM_API_KEY"),
+        description="Deepgram API key when STT_PROVIDER=deepgram",
+    )
 
 
 VALID_ENVIRONMENTS: Set[str] = {"development", "testing", "staging", "production"}
@@ -92,6 +108,29 @@ def validate_configuration(cfg: Settings) -> None:
         raise ValueError(
             f"Invalid ENVIRONMENT: '{cfg.environment}'. "
             f"Permitted values are: {sorted(VALID_ENVIRONMENTS)}."
+        )
+
+    if cfg.max_audio_bytes <= 0:
+        raise ValueError(
+            f"Invalid MAX_AUDIO_BYTES: {cfg.max_audio_bytes}. "
+            "Maximum audio bytes must be a positive integer."
+        )
+
+    if cfg.max_chunks_per_request <= 0:
+        raise ValueError(
+            f"Invalid MAX_CHUNKS_PER_REQUEST: {cfg.max_chunks_per_request}. "
+            "Maximum chunks per request must be a positive integer."
+        )
+
+    if cfg.stt_provider not in ("mock", "deepgram"):
+        raise ValueError(
+            f"Invalid STT_PROVIDER: '{cfg.stt_provider}'. "
+            "Permitted values are: ['deepgram', 'mock']."
+        )
+
+    if cfg.stt_provider == "deepgram" and not cfg.deepgram_api_key:
+        raise ValueError(
+            "Configuration error: DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram."
         )
 
     if not cfg.mock_mode:

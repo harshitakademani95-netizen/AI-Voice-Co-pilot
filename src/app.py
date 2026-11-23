@@ -1,5 +1,13 @@
 """FastAPI Application factory, lifecycle validation, and route configuration."""
+import os
 from pathlib import Path
+import sys
+
+# Ensure src root is in sys.path for submodule resolution
+_src_dir = str(Path(__file__).resolve().parent)
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +17,9 @@ from src.config import settings, validate_configuration
 from src.core.errors import AppError
 from src.core.logging_config import configure_logging
 from src.core.middleware import (
+    LocalAuthorizationMiddleware,
     PayloadSizeLimitMiddleware,
+    RateLimitMiddleware,
     RequestCorrelationMiddleware,
     app_error_handler,
     handle_unhandled_exception,
@@ -17,6 +27,7 @@ from src.core.middleware import (
     validation_exception_handler,
 )
 from src.routes.approvals import router as approvals_router
+from src.routes.gateways import router as gateways_router
 from src.routes.health import router as health_router
 from src.routes.reasoning import router as reasoning_router
 from src.routes.sessions import router as sessions_router
@@ -38,8 +49,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # 1. Register Middlewares (LIFO order: RequestCorrelationMiddleware runs first, wrapping PayloadSizeLimitMiddleware)
+    # 1. Register Middlewares (LIFO order: RequestCorrelationMiddleware runs first)
     app.add_middleware(PayloadSizeLimitMiddleware)
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(LocalAuthorizationMiddleware)
     app.add_middleware(RequestCorrelationMiddleware)
 
     # 2. Register exception handlers for typed error envelopes
@@ -63,6 +76,10 @@ def create_app() -> FastAPI:
     # Approvals & Tool Safety Gate routes
     app.include_router(approvals_router)
     app.include_router(approvals_router, prefix=settings.api_prefix)
+
+    # Audio & Transcription Gateways and Session Integration (Week 3 Day 15)
+    app.include_router(gateways_router)
+    app.include_router(gateways_router, prefix=settings.api_prefix)
 
     # 4. Mount optional frontend web dashboard
     web_dir = Path(__file__).resolve().parent.parent / "web"

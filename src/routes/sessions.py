@@ -24,6 +24,8 @@ from src.repositories.session_repository import session_repository
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
+DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS: float = 30.0
+
 
 def _to_response(session) -> SessionResponse:
     """Converts a Session model to SessionResponse."""
@@ -368,6 +370,7 @@ async def get_session_events(
     request: Request,
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(None, alias="last_event_id"),
+    cursor: Optional[str] = Query(None, description="Event ID or sequence cursor for ordered replay"),
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Max events to return"),
     offset: int = Query(0, ge=0, description="Number of events to skip"),
     timeout: Optional[float] = Query(None, ge=0.0, description="Idle timeout in seconds"),
@@ -379,7 +382,7 @@ async def get_session_events(
 
     # If client explicitly requests text/event-stream on /events, serve as SSE
     if "text/event-stream" in accept_header:
-        effective_reconnect_id = last_event_id or last_event_id_query
+        effective_reconnect_id = last_event_id or last_event_id_query or cursor
         return await _stream_session_events_helper(
             session_id=session_id,
             request=request,
@@ -388,6 +391,14 @@ async def get_session_events(
             timeout=timeout,
             live=live,
             replay_only=replay_only,
+        )
+
+    if cursor is not None:
+        sliced = session_repository.replay_events(session_id, cursor=cursor, limit=limit)
+        return SessionEventsResponse(
+            session_id=session.session_id,
+            events_count=len(sliced),
+            events=sliced,
         )
 
     all_events = session.events
@@ -436,6 +447,8 @@ async def _stream_session_events_helper(
                 effective_timeout = float(env_timeout)
             except ValueError:
                 pass
+    if effective_timeout is None:
+        effective_timeout = DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS
 
     # Determine historical events and handle reconnection
     reconnect_id = last_event_id if isinstance(last_event_id, str) else None

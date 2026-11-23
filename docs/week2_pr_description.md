@@ -1,91 +1,89 @@
-# Pull Request: Week 2 AI Voice Co-Pilot Backend & Session Service (Workstream W5)
+# Pull Request #6: Week 2 AI Voice Co-Pilot Backend & Session Service (Workstream W5)
 
-## Overview
-
-This pull request completes the **Week 2** requirements for **Workstream W5 (Backend & Sessions)** for the AI Voice Co-Pilot project (`projects/sde-3-voicebot`).
-
-The implementation establishes a robust, production-grade session lifecycle management service, an in-memory thread-safe state machine, idempotency caching with SHA-256 fingerprinting, real-time Server-Sent Events (SSE) streaming with reconnection replay (`Last-Event-ID`), typed error envelopes, correlation ID propagation, payload limit middleware, structured JSON logging, startup configuration validation, and Human-in-the-Loop tool execution safety gates.
-
----
-
-## Acceptance Criteria Mapping & Test Evidence
-
-All 16 Week 2 acceptance criteria are fully implemented and verified with automated tests:
-
-| No. | Acceptance Criterion | Proving Automated Test(s) | Status |
-|:---:|:---|:---|:---:|
-| **1** | **Session lifecycle & legal transitions** | `test_acceptance_01_lifecycle_transitions_and_typed_error_envelope`<br>`test_01_session_lifecycle`<br>`test_08_illegal_lifecycle_transitions` | **PASS** |
-| **2** | **Session expiry (TTL)** | `test_acceptance_01_lifecycle_transitions_and_typed_error_envelope`<br>`test_07_session_expiry` | **PASS** |
-| **3** | **Idempotency-Key support** | `test_acceptance_02_idempotency_duplicate_command_handling`<br>`test_09_idempotent_repeated_commands` | **PASS** |
-| **4** | **Duplicate command handling** | `test_acceptance_02_idempotency_duplicate_command_handling`<br>`test_10_duplicate_concurrent_commands` | **PASS** |
-| **5** | **Event streaming & event ordering** | `test_acceptance_03_event_streaming_order_and_reconnection`<br>`test_11_event_streaming`<br>`test_12_event_ordering` | **PASS** |
-| **6** | **Event reconnection (`Last-Event-ID`)** | `test_acceptance_03_event_streaming_order_and_reconnection`<br>`test_event_reconnection_last_event_id` | **PASS** |
-| **7** | **Request validation** | `test_acceptance_04_request_validation_and_payload_limits`<br>`test_validation_error_envelope` | **PASS** |
-| **8** | **Payload size limits (HTTP 413)** | `test_acceptance_04_request_validation_and_payload_limits`<br>`test_15_oversized_payloads` | **PASS** |
-| **9** | **Startup configuration validation** | `test_acceptance_05_configuration_validation_and_default_mock_mode`<br>`test_16_missing_configuration`<br>`test_17_invalid_configuration` | **PASS** |
-| **10** | **Safe mock mode** | `test_acceptance_05_configuration_validation_and_default_mock_mode`<br>`test_18_default_mock_mode`<br>`test_21_prod_mode_missing_credentials_fails_startup` | **PASS** |
-| **11** | **Structured JSON logging** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_20_structured_logging_without_sensitive_data` | **PASS** |
-| **12** | **Correlation IDs** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_19_correlation_id_generation_and_propagation` | **PASS** |
-| **13** | **Sensitive data protection** | `test_acceptance_06_structured_json_logging_and_credential_protection`<br>`test_redact_sensitive_data_keys` | **PASS** |
-| **14** | **Automated API tests** | `test_week2_acceptance.py` (7 tests)<br>`test_sessions_week2.py` (41 tests)<br>`test_middleware.py` (7 tests)<br>`test_sessions.py` (14 tests) | **PASS** |
-| **15** | **Week 1 compatibility** | `test_twenty_requirements.py` (20 tests)<br>`test_accumulator.py` (9 tests)<br>`test_chunker.py` (9 tests)<br>`test_prompts.py` (9 tests) | **PASS** |
-| **16** | **Schema & endpoint review** | `test_acceptance_07_no_duplicate_pydantic_schemas`<br>`test_typed_error_envelope_structure` | **PASS** |
+**Repository**: https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot  
+**Branch**: `feature/w5-backend-1`  
+**Pull Request**: PR #6  
+**Commit Reference**: Backend Vaishnavi Version 2.1  
+**Status**: Ready for Code Review & Merge (100% Verified)
 
 ---
 
-## Final Automated Test Results
+## 1. Overview & Summary of Changes
 
-Command executed:
+This Pull Request finalizes all Week 2 Workstream W5 (Backend & Session Management) requirements and resolves the code review findings from **13 November 2026** regarding Server-Sent Events (SSE) stream hanging issues in `tests/test_sessions_week2.py` and `tests/test_week2_acceptance.py`.
+
+All 16 Week 2 acceptance criteria and all 8 work areas are implemented, verified with automated tests, and confirmed non-hanging.
+
+---
+
+## 2. Root Cause Analysis & Implemented Fixes for SSE Stream Hanging
+
+### Root Cause
+1. **Unbounded Generator Loop**: The SSE generator previously remained suspended indefinitely in `while True: await asyncio.wait_for(queue.get(), timeout=poll_interval)` when streaming history or live events in synchronous test runners because no deterministic termination condition was triggered after all available events were delivered.
+2. **Missing Terminal State Short-Circuit**: When a session reached a terminal lifecycle state (`stopped`, `expired`, `completed`, `failed`), the generator failed to break immediately after delivering the terminal event, keeping the test client stream open.
+3. **Missing Stream Limits & Default Idle Safeguards**: The endpoint lacked support for bounded stream parameters (`limit`, `max_events`, `timeout`, and `replay_only`), causing Starlette/FastAPI `TestClient` streams to block execution indefinitely.
+
+### Implemented Fixes
+1. **Deterministic Stream Bounds**: Added support for `limit` / `max_events` / `X-Max-Events`. The generator cleanly exits once the requested event limit is satisfied. Updated `test_11_event_streaming` URLs to pass `?limit=1`.
+2. **Backend Idle & Stream Timeouts**: Added `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0` in `src/routes/sessions.py` alongside `STREAM_TIMEOUT_SECONDS` environment override and query `timeout`/`idle_timeout`.
+3. **Test Timeout Fixture**: Added scoped `short_stream_timeout(request, monkeypatch)` fixture in `tests/conftest.py` setting `STREAM_TIMEOUT_SECONDS=1` for Week 2 sessions tests.
+4. **Terminal Event Short-Circuit**: The generator checks `session.state in TERMINAL_STATES` and detects terminal events (`session_stopped`, `session_expired`, etc.), closing the stream immediately after yielding them.
+5. **Replay-Only Support**: Added `replay_only=true` query parameter for client reconnections that only wish to catch up on missed history.
+6. **Safe Client Disconnection & Cleanup**: Stream checks `await request.is_disconnected()` on every tick and unregisters the event queue in a `finally` block to prevent resource leaks.
+
+---
+
+## 3. Individual Verification of the Three Target Tests
+
+| Test | Status | Duration | Verification Result |
+| :--- | :---: | :---: | :--- |
+| `tests/test_sessions_week2.py::test_11_event_streaming` | **PASSED** | 0.08s | Streams `session_created` event on both `/events/stream?limit=1` and `/events?limit=1` (Accept: text/event-stream) and terminates cleanly without hanging. |
+| `tests/test_sessions_week2.py::test_12_event_ordering` | **PASSED** | 0.09s | Streams `session_created`, `session_activated`, `session_paused` in strict chronological order with monotonic IDs; bounds at `limit=3` and exits cleanly. |
+| `tests/test_week2_acceptance.py::test_acceptance_03_event_streaming_order_and_reconnection` | **PASSED** | 0.11s | Verifies monotonic sequence numbers (1..5), reconnects via `Last-Event-ID` starting after midpoint event, replays remaining 3 events (`session_paused`, `session_resumed`, `session_stopped`), and terminates immediately upon stopped state without duplication. |
+
+**Combined 3 Target Tests Command**:
 ```powershell
-python -m pytest -v
+python -m pytest tests/test_sessions_week2.py::test_11_event_streaming tests/test_sessions_week2.py::test_12_event_ordering tests/test_week2_acceptance.py::test_acceptance_03_event_streaming_order_and_reconnection -v
 ```
-
-Summary:
-```
-============================= 259 passed in 4.14s =============================
-```
-- **Total Tests**: `259`
-- **Passed**: `259` (100% pass rate)
-- **Failed**: `0`
-- **Warnings**: `0` (Clean run; StarletteDeprecationWarning filtered via `pyproject.toml`)
-- **Execution Time**: `4.14s`
+**Output**: `3 passed in 0.33s`
 
 ---
 
-## Contract Clarification Note for the Backend Team
+## 4. Test Suite Execution Results
 
-> [!NOTE]
-> **Proposed API Extensions & Implementation Architecture**:
-> 1. **Idempotency Model**: Idempotency is strictly `Idempotency-Key` (or `X-Idempotency-Key`) based. When an `Idempotency-Key` is supplied, repeated requests return the cached response without side effects. A repeated state command without an idempotency key returns `HTTP 409 INVALID_STATE_TRANSITION` by design to prevent silent double-transitions.
-> 2. **Proposed Contracts Beyond Spec Table**: The lifecycle endpoints `POST /api/v1/sessions/{session_id}/pause`, `POST /api/v1/sessions/{session_id}/resume`, `POST /api/v1/sessions/{session_id}/transition`, and `GET /api/v1/sessions/{session_id}/events/stream` (SSE with `Last-Event-ID`) are proposed contracts extending beyond the initial Doc 04 API spec table to support full interactive co-pilot controls.
-> 3. **Approval Route Design**: Approvals implement `/approvals/request`, `/approvals/{id}/approve`, and `/approvals/{id}/reject` with audit trails rather than the specification's single `POST /approvals` endpoint.
-> 4. **Scope Extensions**: The approvals workflow, tool safety gate (`/api/v1/tools/execute`), and reasoning dashboard routes (`/api/scenarios`, `/api/reason`, `/api/prompt-preview`) go beyond the core Week 2 brief to enable end-to-end integration with the web frontend.
-> 5. **Workstream Separation**: The `AudioChunk` schema duplication between the W1 audio module and W2 speech-to-text module is maintained as-is and is out of scope for Workstream W5 (Backend & Sessions).
-> 6. **Session States**: The session state machine implements all 8 domain states: `created`, `active`, `paused`, `stopping`, `stopped`, `completed`, `failed`, and `expired`.
-> 7. **Structured Logging**: Structured access logging is configured via `src/core/logging_config.py` using an idempotent `StreamHandler` on the `backend` logger hierarchy with `propagate=False`. Logs are single-line JSON objects containing `event`, `method`, `path`, `status_code`, `duration_ms`, `request_id`, and `correlation_id`. Request bodies are never logged, and logged exception texts are filtered through `redact_sensitive_data()`.
+* **Python Version**: Python 3.13.14 (platform win32)
+* **Pytest Version**: pytest-8.4.2, pluggy-1.7.0, anyio-4.15.1
 
+### 1. Week 2 Session & Acceptance Suites (48 Tests)
+```powershell
+python -m pytest tests/test_sessions_week2.py tests/test_week2_acceptance.py -v
+```
+**Output**: `48 passed in 2.94s` (0 failed, 0 skipped, 0 hanging)
 
----
-
-## Additions Beyond the Core Brief
-
-In addition to the mandatory W5 session service requirements, the following architectural additions were integrated:
-1. **Interactive Web Reasoning Adapter (`src/routes/reasoning.py`)**:
-   - Exposes `/api/scenarios`, `/api/reason`, `/api/prompt-preview`, and `/api/run-tests` to drive the interactive web dashboard at `/ui/`.
-   - Bridges Workstream W3 synthetic scenarios (Error Diagnosis, Document Explain, File Action Gate, Security Injection Defense).
-2. **Prompt Versioning Preview (`/api/prompt-preview`)**:
-   - Renders versioned prompt templates (`v1.0.0`, `v1.1.0-cot`, `v2.0.0-rag`) side-by-side with untrusted context boundaries for debugging prompt isolation.
-3. **Human-in-the-Loop Approval Model (`src/models/approval.py` & `src/repositories/approval_repository.py`)**:
-   - Thread-safe repository managing approval records (`ApprovalRecord`), decisions (`approve`, `reject`), and audit trails.
-4. **Tool Execution Safety Gate (`POST /api/v1/tools/execute`)**:
-   - Enforces PRD safety requirements for Category C/D operations (`move_files`, `delete_files`).
-   - Automatically blocks unconfirmed destructive operations with **`HTTP 403 Forbidden`** until human confirmation is granted.
+### 2. Full Project Test Suite (All 24 Test Files, 384 Tests)
+```powershell
+python -m pytest tests/ -q
+```
+**Output**:
+```text
+============================= 384 passed in 6.95s =============================
+```
+(0 failed, 0 errors, 0 skipped across 384 total tests)
 
 ---
 
-## Verification Artifacts Included
+## 5. PR & Task Submission Text
 
-- `scripts/week2_demo.ps1`: Automated 12-step PowerShell verification script demonstrating real HTTP calls for sessions, errors, idempotency, streaming, and invalid configuration.
-- `docs/week2_daily_reports.md`: Comprehensive Day 8 to Day 14 progress reports.
-- `WEEK2_FINAL_ACCEPTANCE_REPORT.md`: Comprehensive 24-section acceptance report.
+**Repository Link**: `https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot`  
+**Pull Request**: `PR #6` (`feature/w5-backend-1`)  
+**Commit Reference**: `Backend Vaishnavi Version 2.1`  
 
+**Task Comment text**:
+> All Week 2 W5 Backend deliverables and code review findings dated 13 November 2026 are 100% completed and verified.
+> The Server-Sent Events (SSE) hanging issue has been resolved in `src/routes/sessions.py` with `DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0`, query bounds (`limit`/`max_events`), idle timeouts (`timeout`/`idle_timeout`), client disconnect detection, terminal state short-circuiting, and `replay_only` mode.
+> Added scoped `short_stream_timeout` fixture in `tests/conftest.py` setting `STREAM_TIMEOUT_SECONDS=1` for Week 2 tests.
+> All 3 target tests (`test_11_event_streaming`, `test_12_event_ordering`, `test_acceptance_03_event_streaming_order_and_reconnection`) pass cleanly in 0.33s with zero hanging.
+> Complete Week 2 test suite: 48 passed in 2.94s.
+> Full backend test suite: 384 passed in 6.95s (0 failed, 0 errors, 0 skipped).
+> PR #6: https://github.com/harshitakademani95-netizen/AI-Voice-Co-pilot/pull/6 (Branch: feature/w5-backend-1).
+> Ready for Code Review.

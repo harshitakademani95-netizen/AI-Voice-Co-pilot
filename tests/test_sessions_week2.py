@@ -192,7 +192,7 @@ def test_10_duplicate_concurrent_commands(client: TestClient):
 def test_11_event_streaming(client: TestClient):
     """Verifies SSE event stream endpoint returns text/event-stream with active stream and terminates cleanly."""
     c = client.post("/api/v1/sessions").json()["session_id"]
-    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream") as stream:
+    with client.stream("GET", f"/api/v1/sessions/{c}/events/stream?limit=1") as stream:
         assert stream.status_code == 200
         assert "text/event-stream" in stream.headers["content-type"]
         events = []
@@ -203,7 +203,7 @@ def test_11_event_streaming(client: TestClient):
         assert events == ["session_created"]
 
     # Also verify /events streaming
-    with client.stream("GET", f"/api/v1/sessions/{c}/events", headers={"Accept": "text/event-stream"}) as stream2:
+    with client.stream("GET", f"/api/v1/sessions/{c}/events?limit=1", headers={"Accept": "text/event-stream"}) as stream2:
         assert stream2.status_code == 200
         assert "text/event-stream" in stream2.headers["content-type"]
         events2 = []

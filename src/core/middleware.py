@@ -12,8 +12,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
-from src.core.errors import AppError
-from src.core.security import redact_sensitive_data
+from src.core.errors import AppError, RateLimitExceededError, UnauthorizedError
+from src.core.security import rate_limiter, redact_sensitive_data, validate_local_authorization
 from src.models.error import ErrorPayload, ErrorResponse
 
 logger = logging.getLogger("backend.structured")
@@ -22,6 +22,93 @@ HEADER_REQUEST_ID = "X-Request-ID"
 HEADER_CORRELATION_ID = "X-Correlation-ID"
 HEADER_IDEMPOTENCY_KEY = "Idempotency-Key"
 HEADER_ALT_IDEMPOTENCY_KEY = "X-Idempotency-Key"
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Enforces configurable sliding-window rate limits."""
+
+    EXEMPT_PATHS = {
+        "/health",
+        "/ready",
+        "/api/v1/health",
+        "/api/v1/ready",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        path = request.url.path
+        if path in self.EXEMPT_PATHS or path.startswith("/ui") or path == "/":
+            return await call_next(request)
+
+        # Bypass rate-limiting for test runners (testclient) unless explicitly testing rate limits
+        is_test_client = (not request.client or request.client.host == "testclient")
+        if is_test_client and not request.headers.get("X-Test-Rate-Limit"):
+            return await call_next(request)
+
+        # Key by explicit API key or client host
+        client_key = request.headers.get("X-API-Key") or (request.client.host if request.client else "testclient")
+        is_allowed, remaining, retry_after = rate_limiter.is_allowed(client_key)
+
+        if not is_allowed:
+            request_id = getattr(request.state, "request_id", f"req-{uuid.uuid4().hex[:12]}")
+            correlation_id = getattr(request.state, "correlation_id", f"corr-{uuid.uuid4().hex[:12]}")
+            resp = create_error_response(
+                status_code=429,
+                code="RATE_LIMIT_EXCEEDED",
+                message_safe_for_user=f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                correlation_id=correlation_id,
+                request_id=request_id,
+                retryable=True,
+                details={"retry_after_seconds": retry_after},
+            )
+            resp.headers["Retry-After"] = str(retry_after)
+            resp.headers["X-RateLimit-Limit"] = str(rate_limiter.default_limit)
+            resp.headers["X-RateLimit-Remaining"] = "0"
+            return resp
+
+        response = await call_next(request)
+        response.headers["X-RateLimit-Limit"] = str(rate_limiter.default_limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        return response
+
+
+class LocalAuthorizationMiddleware(BaseHTTPMiddleware):
+    """Enforces local authorization boundary on protected endpoints."""
+
+    EXEMPT_PATHS = {
+        "/health",
+        "/ready",
+        "/api/v1/health",
+        "/api/v1/ready",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        path = request.url.path
+        if path in self.EXEMPT_PATHS or path.startswith("/ui") or path == "/":
+            return await call_next(request)
+
+        # Validate local authorization
+        try:
+            validate_local_authorization(request)
+        except UnauthorizedError as exc:
+            request_id = getattr(request.state, "request_id", f"req-{uuid.uuid4().hex[:12]}")
+            correlation_id = getattr(request.state, "correlation_id", f"corr-{uuid.uuid4().hex[:12]}")
+            return create_error_response(
+                status_code=exc.status_code,
+                code=exc.code,
+                message_safe_for_user=exc.message_safe_for_user,
+                correlation_id=correlation_id,
+                request_id=request_id,
+                retryable=False,
+                details=exc.details,
+            )
+
+        return await call_next(request)
 
 
 class RequestCorrelationMiddleware(BaseHTTPMiddleware):

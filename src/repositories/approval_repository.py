@@ -62,6 +62,8 @@ class ApprovalRepository:
             self._check_expiry_unlocked(record)
             return record
 
+    get_request = get
+
     def _check_expiry_unlocked(self, record: ApprovalRecord) -> bool:
         if record.status == ApprovalStatus.PENDING:
             exp = datetime.fromisoformat(record.expires_at)
@@ -75,7 +77,8 @@ class ApprovalRepository:
                 return True
         return False
 
-    def approve(self, approval_id: str, user_id: str = "user_local") -> ApprovalRecord:
+    def approve(self, approval_id: str, user_id: str = "user_local", reviewed_by: Optional[str] = None) -> ApprovalRecord:
+        effective_user = reviewed_by or user_id
         with self._lock:
             record = self._approvals.get(approval_id)
             if not record:
@@ -94,17 +97,18 @@ class ApprovalRepository:
             now = datetime.now(timezone.utc).isoformat()
             record.status = ApprovalStatus.APPROVED
             record.resolved_at = now
-            record.resolved_by = user_id
+            record.resolved_by = effective_user
 
             self._audit_logs.append({
                 "event": "approval_granted",
                 "approval_id": approval_id,
-                "resolved_by": user_id,
+                "resolved_by": effective_user,
                 "timestamp": now,
             })
             return record
 
-    def reject(self, approval_id: str, user_id: str = "user_local", reason: Optional[str] = None) -> ApprovalRecord:
+    def reject(self, approval_id: str, user_id: str = "user_local", reason: Optional[str] = None, reviewed_by: Optional[str] = None) -> ApprovalRecord:
+        effective_user = reviewed_by or user_id
         with self._lock:
             record = self._approvals.get(approval_id)
             if not record:
