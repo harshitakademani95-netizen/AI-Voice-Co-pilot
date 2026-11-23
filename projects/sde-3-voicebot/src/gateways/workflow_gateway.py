@@ -153,6 +153,23 @@ class WorkflowGateway:
 
         def _perform_execution() -> ToolExecuteResponse:
             exec_id = f"exec-{uuid.uuid4().hex[:8]}"
+            # Delegate to registered agentic tools if available
+            try:
+                from agentic_workflow.tools import ToolRegistry
+                reg = ToolRegistry()
+                if reg.is_registered(tool_clean):
+                    output = reg.execute(tool_clean, request.parameters)
+                    res_payload = output if isinstance(output, dict) else {"result": output}
+                    return ToolExecuteResponse(
+                        execution_id=exec_id,
+                        tool_name=request.tool_name,
+                        status="completed",
+                        result=res_payload,
+                        requires_approval=False,
+                    )
+            except Exception as err:
+                logger.warning("ToolRegistry execution exception for %s: %s", tool_clean, err)
+
             res_dict = {
                 "message": f"Tool '{request.tool_name}' successfully executed under session '{request.session_id}'.",
                 "parameters": request.parameters,
