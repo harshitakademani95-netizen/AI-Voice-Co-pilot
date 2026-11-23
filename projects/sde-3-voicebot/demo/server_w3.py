@@ -222,10 +222,54 @@ class LocalhostHandler(http.server.SimpleHTTPRequestHandler):
             }, status=400)
 
     def _handle_run_tests(self):
+        tests_dir = os.path.join(PROJECT_ROOT, "tests")
+
+        # 1. Primary: Run full pytest suite via subprocess for all 534 tests
+        try:
+            import subprocess
+            import re
+
+            start = time.time()
+            env = os.environ.copy()
+            src_dir = os.path.join(PROJECT_ROOT, "src")
+            env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{PROJECT_ROOT}"
+            res = subprocess.run(
+                [sys.executable, "-m", "pytest", tests_dir, "-q", "--no-header"],
+                capture_output=True,
+                text=True,
+                cwd=PROJECT_ROOT,
+                env=env,
+                timeout=120,
+            )
+            elapsed = round(time.time() - start, 3)
+            output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
+
+            passed_m = re.search(r"(\d+)\s+passed", output)
+            failed_m = re.search(r"(\d+)\s+failed", output)
+            error_m = re.search(r"(\d+)\s+error", output)
+
+            passed = int(passed_m.group(1)) if passed_m else 0
+            failed = int(failed_m.group(1)) if failed_m else 0
+            errors = int(error_m.group(1)) if error_m else 0
+            total = passed + failed + errors
+
+            if total > 0:
+                self._send_json({
+                    "total": total,
+                    "passed": passed,
+                    "failures": failed + errors,
+                    "duration": elapsed,
+                    "log": output.strip(),
+                })
+                return
+        except Exception:
+            pass
+
+        # 2. Fallback to unittest
         stream = io.StringIO()
         start = time.time()
         loader = unittest.TestLoader()
-        suite = loader.discover(os.path.join(PROJECT_ROOT, "tests"), pattern="test_*.py")
+        suite = loader.discover(tests_dir, pattern="test_*.py")
         runner = unittest.TextTestRunner(stream=stream, verbosity=2)
         result = runner.run(suite)
         elapsed = round(time.time() - start, 3)

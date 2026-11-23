@@ -166,16 +166,69 @@ async def preview_prompt(body: WebPromptPreviewRequest):
 
 
 def _run_test_suite_sync(tests_dir: str):
-    """Executes the complete pytest test suite in a worker thread and gathers accurate statistics."""
+    """Executes the complete pytest test suite and gathers accurate statistics."""
     project_root = os.path.dirname(tests_dir)
     src_dir = os.path.join(project_root, "src")
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+
+    # 1. Primary method: execute pytest in subprocess for full fidelity and clean isolation
+    try:
+        import subprocess
+        import re
+
+        start = time.time()
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{project_root}"
+        res = subprocess.run(
+            [sys.executable, "-m", "pytest", tests_dir, "-q", "--no-header"],
+            capture_output=True,
+            text=True,
+            cwd=project_root,
+            env=env,
+            timeout=120,
+        )
+        elapsed = round(time.time() - start, 3)
+        output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
+
+        # Regex match pytest summary line, e.g. "534 passed in 5.29s" or "534 passed, 1 warning in 5.29s"
+        passed_m = re.search(r"(\d+)\s+passed", output)
+        failed_m = re.search(r"(\d+)\s+failed", output)
+        error_m = re.search(r"(\d+)\s+error", output)
+
+        passed = int(passed_m.group(1)) if passed_m else 0
+        failed = int(failed_m.group(1)) if failed_m else 0
+        errors = int(error_m.group(1)) if error_m else 0
+        total = passed + failed + errors
+
+        if total > 0:
+            return {
+                "total": total,
+                "passed": passed,
+                "failures": failed + errors,
+                "duration": elapsed,
+                "log": output.strip(),
+            }
+    except Exception:
+        pass
+
+    # 2. In-process pytest fallback with --capture=no to prevent fileno errors on redirected streams
     try:
         import pytest
-        from contextlib import redirect_stdout, redirect_stderr
+        import re
+
+        from src.core.security import rate_limiter
+        from src.repositories.session_repository import session_repository
+        from src.repositories.approval_repository import approval_repository
+        from src.gateways import service as gw_service_mod
+        from src.gateways import workflow_gateway as wf_gw_mod
+        gw_service_mod._gateway_service_instance = None
+        wf_gw_mod._workflow_gateway_instance = None
+        rate_limiter.reset()
+        session_repository.clear()
+        approval_repository.clear()
 
         class _PytestStatCollector:
             def __init__(self):
@@ -198,23 +251,10 @@ def _run_test_suite_sync(tests_dir: str):
                     self.errors += 1
                     self.failures_list.append(f"ERROR ({report.when}) {report.nodeid}: {report.longreprtext or str(report.longrepr)}")
 
-        from src.core.security import rate_limiter
-        from src.repositories.session_repository import session_repository
-        from src.repositories.approval_repository import approval_repository
-        from src.gateways import service as gw_service_mod
-        from src.gateways import workflow_gateway as wf_gw_mod
-        gw_service_mod._gateway_service_instance = None
-        wf_gw_mod._workflow_gateway_instance = None
-        rate_limiter.reset()
-        session_repository.clear()
-        approval_repository.clear()
-
         collector = _PytestStatCollector()
-        stream = io.StringIO()
         start = time.time()
         try:
-            with redirect_stdout(stream), redirect_stderr(stream):
-                pytest.main(["-q", "--no-header", "--tb=line", tests_dir], plugins=[collector])
+            pytest.main(["-s", "--capture=no", "-q", "--no-header", "--tb=line", tests_dir], plugins=[collector])
         finally:
             rate_limiter.reset()
             session_repository.clear()
@@ -226,7 +266,7 @@ def _run_test_suite_sync(tests_dir: str):
         failures = collector.failed + collector.errors
 
         if total > 0:
-            log_output = stream.getvalue()
+            log_output = f"{collector.passed} passed in {elapsed}s"
             if collector.failures_list:
                 log_output += "\n\nFailures Detail:\n" + "\n".join(collector.failures_list)
             return {
@@ -239,7 +279,7 @@ def _run_test_suite_sync(tests_dir: str):
     except Exception:
         pass
 
-    # Fallback to unittest if pytest is not available
+    # 3. Fallback to unittest if pytest is not available
     stream = io.StringIO()
     start = time.time()
     loader = unittest.TestLoader()
