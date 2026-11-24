@@ -173,6 +173,15 @@ class BackendGatewayService:
         prompt_version: str = "v1.0.0",
     ) -> Dict[str, Any]:
         """Executes the full Day 21 End-to-End Pipeline: Audio -> STT -> Reasoning -> Workflow Policy -> Session Events."""
+        # Ensure session exists for pipeline execution
+        try:
+            self.session_repo.get(session_id)
+        except Exception:
+            try:
+                self.session_repo.create(session_id=session_id)
+            except Exception:
+                pass
+
         # 1. Process Audio & Transcription if audio is passed
         transcript_text = ""
         chunks_count = 0

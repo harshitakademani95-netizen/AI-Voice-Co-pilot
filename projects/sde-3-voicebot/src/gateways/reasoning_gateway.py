@@ -24,6 +24,7 @@ from src.core.errors import (
 )
 from src.gateways.resilience import CircuitBreaker, CircuitBreakerOpenError, retry_with_backoff
 from src.reasoning.mock_engine import MockReasoningEngine
+from src.reasoning.real_engine import get_reasoning_engine
 
 logger = logging.getLogger("backend.gateways.reasoning")
 
@@ -33,13 +34,13 @@ class ReasoningGateway:
 
     def __init__(
         self,
-        engine: Optional[MockReasoningEngine] = None,
+        engine: Optional[Any] = None,
         timeout_seconds: float = 10.0,
         max_workers: int = 4,
         circuit_breaker: Optional[CircuitBreaker] = None,
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
-        self.engine = engine or MockReasoningEngine()
+        self.engine = engine or get_reasoning_engine()
         self.timeout_seconds = timeout_seconds
         self.sleep_fn = sleep_fn
         self.circuit_breaker = circuit_breaker or CircuitBreaker(
@@ -174,6 +175,7 @@ class ReasoningGateway:
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
             avg_lat = (self._total_latency_ms / self._total_calls) if self._total_calls > 0 else 0.0
+            engine_info = getattr(self.engine, "get_info", lambda: {"engine": type(self.engine).__name__, "active_mode": "mock"})()
             return {
                 "gateway": "ReasoningGateway",
                 "is_available": self.is_available,
@@ -183,6 +185,7 @@ class ReasoningGateway:
                 "avg_latency_ms": round(avg_lat, 2),
                 "last_success_at": self._last_success_at,
                 "last_error": self._last_error,
+                "engine_info": engine_info,
             }
 
     def close(self) -> None:

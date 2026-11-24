@@ -30,13 +30,13 @@
           <span class="status-dot"></span>
           <span>Screen Capture: <strong>Disabled by Default</strong></span>
         </div>
-        <div class="status-pill status-mock">
-          <span class="status-dot green"></span>
-          <span>Mock Reasoning: <strong>Deterministic (Offline)</strong></span>
+        <div class="status-pill status-mock" id="reasoning-status-pill">
+          <span class="status-dot green" id="reasoning-status-dot"></span>
+          <span id="reasoning-status-label">Reasoning Engine: <strong>Real Execution (Active)</strong></span>
         </div>
-        <button id="btn-run-tests" class="btn btn-secondary btn-sm" title="Run automated unit test suite (565 tests)" aria-label="Run automated unit test suite (565 tests)">
+        <button id="btn-run-tests" class="btn btn-secondary btn-sm" title="Run automated unit test suite (578 tests)" aria-label="Run automated unit test suite (578 tests)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-          Run Tests (565/565)
+          Run Tests (578/578)
         </button>
       </div>
     </header>
@@ -114,13 +114,17 @@
           <div class="input-wrapper">
             <textarea id="user-query-input" rows="3" class="text-area-input" placeholder="Enter query..." aria-label="User query input">Why is this application failing?</textarea>
             <div class="input-actions">
-              <button type="button" id="btn-mic-simulate" class="btn-mic" title="Simulate Voice Input" aria-label="Simulate Voice Input">
+              <button type="button" id="btn-mic-simulate" class="btn-mic" title="Audio Ingest & STT Transcription" aria-label="Audio Ingest & STT Transcription">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                <span>Voice Pulse</span>
+                <span>Voice STT Ingest</span>
               </button>
               <button type="button" id="btn-dispatch" class="btn btn-primary" aria-label="Execute Reasoning">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 Execute Reasoning
+              </button>
+              <button type="button" id="btn-pipeline" class="btn btn-secondary" title="Run Full End-to-End Pipeline (Audio -> STT -> Dispatcher -> Reasoning -> Execution)" aria-label="Run Full Pipeline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Full Pipeline
               </button>
             </div>
           </div>

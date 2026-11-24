@@ -22,13 +22,22 @@ from src.context.fixtures import (
     get_synthetic_file_action_scenario,
 )
 from src.context.schemas import ContextItem, ContextType, ReasoningRequest, ReasoningResult
+from src.gateways.reasoning_gateway import get_reasoning_gateway
 from src.prompts.versioned_prompts import build_versioned_prompt
-from src.reasoning.mock_engine import MockReasoningEngine
+from src.reasoning.real_engine import get_reasoning_engine
 from src.repositories.approval_repository import approval_repository
 
 router = APIRouter(tags=["Reasoning & Web UI"])
 
-ENGINE = MockReasoningEngine()
+
+@router.get(
+    "/api/reasoning/engine-status",
+    summary="Get reasoning engine status",
+    description="Returns current status, active mode, and telemetry for the reasoning engine.",
+)
+async def get_engine_status():
+    gateway = get_reasoning_gateway()
+    return gateway.get_status()
 
 
 def get_scenario_data() -> Dict[str, Any]:
@@ -116,13 +125,18 @@ async def execute_reasoning(body: WebReasonRequest, request: Request):
             prompt_version=body.prompt_version,
         )
 
-        res: ReasoningResult = ENGINE.reason(reason_req)
+        reason_gw = get_reasoning_gateway()
+        res: ReasoningResult = reason_gw.reason(
+            reason_req,
+            correlation_id=getattr(request.state, "correlation_id", None),
+        )
         rendered_prompt = build_versioned_prompt(
             body.prompt_version, body.user_query.strip(), context_items
         )
 
         out = res.model_dump(mode="json")
         out["rendered_prompt"] = rendered_prompt
+        out["engine_info"] = reason_gw.get_status().get("engine_info", {})
 
         # Integrate agent orchestration for planning, tool execution, and verification
         from src.orchestration.agent_orchestrator import agent_orchestrator

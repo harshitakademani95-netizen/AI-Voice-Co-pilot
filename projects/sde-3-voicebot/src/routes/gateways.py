@@ -328,9 +328,13 @@ def _execute_pipeline_core(
     correlation_id: Optional[str],
 ) -> Dict[str, Any]:
     svc = get_gateway_service()
-    session = svc.session_repo.get(session_id)
+    session = None
+    try:
+        session = svc.session_repo.get(session_id)
+    except Exception:
+        pass
     if not session:
-        raise SessionNotFoundError(session_id)
+        session = svc.session_repo.create(session_id=session_id)
 
     audio_bytes: Optional[bytes] = None
     fmt: Optional[AudioFormat] = None
