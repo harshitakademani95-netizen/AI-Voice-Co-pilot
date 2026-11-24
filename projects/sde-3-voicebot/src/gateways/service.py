@@ -252,15 +252,33 @@ class BackendGatewayService:
                 correlation_id=correlation_id,
             )
 
+        # 5. Agent Orchestration (Planning, Tool Calling, and Result Verification)
+        from src.orchestration.agent_orchestrator import agent_orchestrator
+
+        orch_res = agent_orchestrator.orchestrate(
+            session_id=session_id,
+            user_query=effective_query,
+            intent=getattr(reason_res, "intent", None),
+            action_type=reason_res.action_type,
+            correlation_id=correlation_id,
+            context_items=c_items,
+        )
+
+        effective_approval_id = workflow_info.get("approval_id") or orch_res.approval_id
+        final_status = "requires_approval" if (reason_res.requires_approval or orch_res.approval_id) else orch_res.status
+
         return {
             "session_id": session_id,
-            "status": "requires_approval" if reason_res.requires_approval else "completed",
-            "approval_id": workflow_info.get("approval_id"),
+            "status": final_status,
+            "approval_id": effective_approval_id,
             "audio_chunks_processed": chunks_count,
             "chunks_count": chunks_count,
             "transcript": transcript_text,
             "reasoning": reason_res.model_dump(),
             "workflow": workflow_info,
+            "agent_orchestration": orch_res.to_dict(),
+            "final_response": orch_res.final_response,
+            "verification": orch_res.verification.model_dump(),
             "events_recorded": len(self.session_repo.get(session_id).events),
         }
 
