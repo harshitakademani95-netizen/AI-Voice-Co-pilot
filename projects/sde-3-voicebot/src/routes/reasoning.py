@@ -124,12 +124,23 @@ async def execute_reasoning(body: WebReasonRequest, request: Request):
         out = res.model_dump(mode="json")
         out["rendered_prompt"] = rendered_prompt
 
+        # Integrate agent orchestration for planning, tool execution, and verification
+        from src.orchestration.agent_orchestrator import agent_orchestrator
+        orch_res = agent_orchestrator.orchestrate(
+            session_id="session-localhost-user",
+            user_query=body.user_query.strip(),
+            intent=getattr(res, "intent", None),
+            action_type=res.action_type,
+            context_items=context_items,
+        )
+        out["agent_orchestration"] = orch_res.to_dict()
+
         # If Human-in-the-Loop approval is required (Category C or D), register approval token
-        if res.requires_approval:
+        if res.requires_approval or orch_res.approval_id:
             approval = approval_repository.create_request(
                 session_id="session-localhost-user",
                 action_type=res.action_type or "move_files",
-                risk_level=res.risk_level.value,
+                risk_level=res.risk_level.value if hasattr(res.risk_level, "value") else "C",
                 parameters={"query": body.user_query.strip(), "scenario": body.scenario},
             )
             out["approval_id"] = approval.approval_id
@@ -140,6 +151,55 @@ async def execute_reasoning(body: WebReasonRequest, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
+
+class DispatcherQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Incoming user query or command")
+    session_id: Optional[str] = Field(default="default-session", description="Session identifier")
+    context_items: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Associated context")
+    prompt_version: Optional[str] = Field(default="v1.0.0", description="Prompt version")
+
+
+@router.post(
+    "/api/dispatcher/query",
+    summary="Content & Query Dispatcher",
+    description="Dispatches queries to context retrieval, reasoning, task planning, and tool execution.",
+)
+@router.post(
+    "/api/v1/dispatcher/query",
+    summary="Content & Query Dispatcher v1",
+    description="Dispatches queries to context retrieval, reasoning, task planning, and tool execution.",
+)
+async def dispatch_query(body: DispatcherQueryRequest, request: Request):
+    if not body.query or not body.query.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Query cannot be empty")
+
+    c_items = []
+    for item in body.context_items:
+        try:
+            c_items.append(ContextItem(**item))
+        except Exception:
+            pass
+
+    from src.orchestration.agent_orchestrator import agent_orchestrator
+    orch_res = agent_orchestrator.orchestrate(
+        session_id=body.session_id,
+        user_query=body.query.strip(),
+        context_items=c_items,
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "query": body.query.strip(),
+            "session_id": body.session_id,
+            "status": orch_res.status,
+            "approval_id": orch_res.approval_id,
+            "final_response": orch_res.final_response,
+            "plan": orch_res.plan.model_dump(),
+            "verification": orch_res.verification.model_dump(),
+        },
+    )
 
 
 @router.post(

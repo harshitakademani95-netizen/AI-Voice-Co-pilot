@@ -1,4 +1,13 @@
 """Pytest fixtures for AI Voice Co-Pilot: STT pipeline and Backend tests."""
+from pathlib import Path
+import sys
+
+_project_dir = Path(__file__).resolve().parent.parent
+_src_dir = _project_dir / "src"
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+if str(_project_dir) not in sys.path:
+    sys.path.insert(0, str(_project_dir))
 
 from typing import List
 import pytest

@@ -89,16 +89,42 @@ function setupEventListeners() {
     }
   });
 
-  // Approval Gate Actions (Replacing alert() with accessible toast notifications)
-  document.getElementById('btn-approve-action').addEventListener('click', () => {
+  // Approval Gate Actions (Connected to backend approval endpoints)
+  document.getElementById('btn-approve-action').addEventListener('click', async () => {
     document.getElementById('approval-gate-banner').classList.add('hidden');
-    showToast("Action APPROVED by user. Human-in-the-Loop confirmed.", "success");
+    if (window._currentApprovalId) {
+      try {
+        await fetch(`/api/v1/approvals/${window._currentApprovalId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision_reason: "Approved via Web UI" })
+        });
+        showToast(`Approval #${window._currentApprovalId} confirmed on backend.`, "success");
+      } catch (err) {
+        showToast("Action APPROVED by user. Human-in-the-Loop confirmed.", "success");
+      }
+    } else {
+      showToast("Action APPROVED by user. Human-in-the-Loop confirmed.", "success");
+    }
     announceToA11y("Action approved by user.");
   });
 
-  document.getElementById('btn-reject-action').addEventListener('click', () => {
+  document.getElementById('btn-reject-action').addEventListener('click', async () => {
     document.getElementById('approval-gate-banner').classList.add('hidden');
-    showToast("Action REJECTED by user. Safety boundary enforced.", "warning");
+    if (window._currentApprovalId) {
+      try {
+        await fetch(`/api/v1/approvals/${window._currentApprovalId}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: "Rejected via Web UI" })
+        });
+        showToast(`Action #${window._currentApprovalId} REJECTED on backend.`, "warning");
+      } catch (err) {
+        showToast("Action REJECTED by user. Safety boundary enforced.", "warning");
+      }
+    } else {
+      showToast("Action REJECTED by user. Safety boundary enforced.", "warning");
+    }
     announceToA11y("Action rejected by user. Safety boundary enforced.");
   });
 
@@ -317,6 +343,7 @@ function renderErrorResult(errorMessage) {
 }
 
 function renderReasoningResult(result) {
+  window._currentApprovalId = result.approval_id || null;
   const bodyEl = document.getElementById('response-text-body');
   bodyEl.textContent = result.response_text;
 

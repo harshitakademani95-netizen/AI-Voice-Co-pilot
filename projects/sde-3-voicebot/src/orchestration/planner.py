@@ -102,7 +102,7 @@ class TaskPlanner:
                 step_id="step-1",
                 description="Check tasks and pending actions",
                 tool_name="mock_task_checker",
-                inputs={"user_id": session_id},
+                inputs={"task_id": "task-mock-01", "user_id": session_id},
                 depends_on=[],
                 requires_approval=False,
                 risk_level="A",

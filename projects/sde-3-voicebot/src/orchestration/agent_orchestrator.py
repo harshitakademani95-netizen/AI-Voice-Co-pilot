@@ -86,6 +86,15 @@ class AgentOrchestrationService:
         """Executes the full agentic loop: Retrieval -> Planning -> Execution -> Verification -> Event Recording."""
         corr_id = correlation_id or f"corr-{uuid.uuid4().hex[:8]}"
 
+        # Ensure session exists (auto-create if missing for ad-hoc queries)
+        try:
+            self.session_repo.get(session_id)
+        except Exception:
+            try:
+                self.session_repo.create(session_id=session_id)
+            except Exception:
+                pass
+
         # 1. Retrieve & sanitize relevant context
         retrieved_items = self.retriever.retrieve(session_id=session_id, query=user_query)
         all_context = list(context_items or []) + retrieved_items
