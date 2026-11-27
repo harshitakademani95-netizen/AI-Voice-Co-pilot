@@ -71,10 +71,24 @@ venv.bak/
 *.webm
 *.png
 *.jpg
+*.jpeg
+*.webp
+*.bmp
+*.gif
+*.heic
+*.tiff
+*.mov
 *.mp4
+screenshots/
 recordings/
 audio_cache/
-screenshots/
+
+# PDF files under screenshot/recording directories only
+screenshots/**/*.pdf
+recordings/**/*.pdf
+
+# Allow .env.example (template without real secrets)
+!.env.example
 
 # Logs
 *.log

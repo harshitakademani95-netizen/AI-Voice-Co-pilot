@@ -11,11 +11,14 @@ Provides:
 """
 
 from datetime import datetime, timezone
+import io
 import json
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import secrets
 import sys
+import time
+import unittest
 from typing import Any, Dict, List, Optional
 
 from agentic_workflow import (
@@ -43,7 +46,9 @@ from src.context.fixtures import (
 )
 from src.context.schemas import ContextItem, ContextType, ReasoningRequest, ReasoningResult
 from src.prompts.versioned_prompts import DEFAULT_REGISTRY, build_versioned_prompt
+from src.reasoning.llm_client import LLMClientAdapter, MockLLMClient
 from src.reasoning.mock_engine import MockReasoningEngine
+from src.reasoning.workflow_handoff import build_workflow_proposal, validate_proposal
 from pydantic import ValidationError
 import mimetypes
 
@@ -540,23 +545,42 @@ class WorkflowHTTPHandler(BaseHTTPRequestHandler):
 
     def _handle_reason(self, data: dict):
         req_id = data.get("request_id") or f"req-{int(time.time() * 1000)}"
-        scenario_key = data.get("scenario", "error")
-        user_query = data.get("user_query", "").strip()
-        if not user_query:
-            self._send_json(400, {
-                "error": {
-                    "code": "INVALID_REQUEST",
-                    "message": "Invalid request: 'user_query' cannot be empty.",
-                    "request_id": req_id
-                }
-            })
-            return
-
-        prompt_version = data.get("prompt_version", "v1.0.0")
-        scenarios = get_scenario_data()
-        raw_items = scenarios.get(scenario_key, scenarios["error"])["context_items"]
-
         try:
+            raw_query = data.get("user_query")
+            if not isinstance(raw_query, str):
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "Invalid request: 'user_query' must be a non-empty string.",
+                        "request_id": req_id
+                    }
+                })
+                return
+            user_query = raw_query.strip()
+            if not user_query:
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "Invalid request: 'user_query' cannot be empty.",
+                        "request_id": req_id
+                    }
+                })
+                return
+
+            scenario_key = data.get("scenario", "error")
+            scenarios = get_scenario_data()
+            if scenario_key not in scenarios:
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": f"Unknown scenario '{scenario_key}'. Valid scenarios: {list(scenarios.keys())}.",
+                        "request_id": req_id
+                    }
+                })
+                return
+
+            prompt_version = data.get("prompt_version", "v1.0.0")
+            raw_items = scenarios[scenario_key]["context_items"]
             context_items = [ContextItem(**item) for item in raw_items]
             req = ReasoningRequest(
                 request_id=req_id,
@@ -565,11 +589,26 @@ class WorkflowHTTPHandler(BaseHTTPRequestHandler):
                 context_items=context_items,
                 prompt_version=prompt_version,
             )
-            res = ENGINE.reason(req)
+            adapter = LLMClientAdapter(provider=MockLLMClient())
+            res = adapter.generate(req)
             rendered_prompt = build_versioned_prompt(prompt_version, user_query, context_items)
 
             out = res.model_dump(mode="json")
             out["rendered_prompt"] = rendered_prompt
+            out["sources"] = [s.model_dump(mode="json") for s in res.sources]
+            out["status"] = res.status
+
+            if res.action_required:
+                proposal = build_workflow_proposal(
+                    result=res,
+                    session_id=data.get("session_id", "web-session"),
+                    registry=registry,
+                )
+                validate_proposal(proposal, registry=registry)
+                out["workflow_proposal"] = proposal.model_dump(mode="json")
+            else:
+                out["workflow_proposal"] = None
+
             self._send_json(200, out)
         except (ValidationError, KeyError, ValueError) as e:
             self._send_json(400, {
@@ -590,22 +629,42 @@ class WorkflowHTTPHandler(BaseHTTPRequestHandler):
 
     def _handle_prompt_preview(self, data: dict):
         req_id = f"preview-{int(time.time() * 1000)}"
-        scenario_key = data.get("scenario", "error")
-        user_query = data.get("user_query", "").strip()
-        if not user_query:
-            self._send_json(400, {
-                "error": {
-                    "code": "INVALID_REQUEST",
-                    "message": "Invalid request: 'user_query' cannot be empty for prompt preview.",
-                    "request_id": req_id
-                }
-            })
-            return
-        prompt_version = data.get("prompt_version", "v1.0.0")
-        scenarios = get_scenario_data()
-        raw_items = scenarios.get(scenario_key, scenarios["error"])["context_items"]
-
         try:
+            raw_query = data.get("user_query")
+            if not isinstance(raw_query, str):
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "Invalid request: 'user_query' must be a non-empty string for prompt preview.",
+                        "request_id": req_id
+                    }
+                })
+                return
+            user_query = raw_query.strip()
+            if not user_query:
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "Invalid request: 'user_query' cannot be empty for prompt preview.",
+                        "request_id": req_id
+                    }
+                })
+                return
+
+            scenario_key = data.get("scenario", "error")
+            scenarios = get_scenario_data()
+            if scenario_key not in scenarios:
+                self._send_json(400, {
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": f"Unknown scenario '{scenario_key}'. Valid scenarios: {list(scenarios.keys())}.",
+                        "request_id": req_id
+                    }
+                })
+                return
+
+            prompt_version = data.get("prompt_version", "v1.0.0")
+            raw_items = scenarios[scenario_key]["context_items"]
             context_items = [ContextItem(**item) for item in raw_items]
             rendered = build_versioned_prompt(prompt_version, user_query, context_items)
             self._send_json(200, {"rendered_prompt": rendered})
@@ -725,6 +784,12 @@ class WorkflowHTTPHandler(BaseHTTPRequestHandler):
         if self.path in ["/api/reason", "/api/preview", "/api/run-tests"]:
             if self.path == "/api/run-tests":
                 self._handle_run_tests()
+                return
+
+            # Apply Content-Type check to /api/reason and /api/preview
+            content_type = self.headers.get("Content-Type", "")
+            if "application/json" not in content_type:
+                self._send_json(415, {"error": "Unsupported Media Type: Content-Type must be application/json"})
                 return
 
             content_len = int(self.headers.get("Content-Length", 0))

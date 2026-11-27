@@ -10,11 +10,12 @@ import sys
 import time
 import unittest
 
-# Setup sys.path with project root and src/ without duplicates
+# Setup sys.path with project root, src/, and web/ without duplicates
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_DIR = PROJECT_ROOT / "src"
+WEB_DIR = PROJECT_ROOT / "web"
 
-for path_entry in (SRC_DIR, PROJECT_ROOT):
+for path_entry in (WEB_DIR, SRC_DIR, PROJECT_ROOT):
     p_str = str(path_entry)
     if p_str in sys.path:
         sys.path.remove(p_str)
@@ -29,7 +30,16 @@ W3_TEST_FILES = [
     "test_bounded_builder.py",
     "test_llm_client.py",
     "test_llm_malformed_output.py",
+    "test_observations.py",
+    "test_grounded_answers.py",
+    "test_prompt_injection_security.py",
+    "test_consent_withdrawal.py",
+    "test_server_api_validation.py",
+    "test_no_evidence_responses.py",
+    "test_workflow_handoff.py",
+    "test_final_integration.py",
     "test_demo_week2.py",
+    "test_demo_week3.py",
 ]
 
 

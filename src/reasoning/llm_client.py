@@ -42,6 +42,31 @@ from src.reasoning.mock_engine import MockReasoningEngine
 
 
 # =============================================================================
+# Action Policy Table (Output-Side Prompt Injection Enforcement)
+# =============================================================================
+
+ACTION_POLICY: Dict[str, Dict[str, Any]] = {
+    "check_task": {"min_risk_level": RiskCategory.CATEGORY_B, "requires_approval": False, "allowed": True},
+    "generate_report": {"min_risk_level": RiskCategory.CATEGORY_C, "requires_approval": True, "allowed": True},
+    "move_files": {"min_risk_level": RiskCategory.CATEGORY_C, "requires_approval": True, "allowed": False},
+    "archive_files": {"min_risk_level": RiskCategory.CATEGORY_C, "requires_approval": True, "allowed": False},
+    "rename_files": {"min_risk_level": RiskCategory.CATEGORY_C, "requires_approval": True, "allowed": False},
+    "search_workspace": {"min_risk_level": RiskCategory.CATEGORY_B, "requires_approval": False, "allowed": False},
+    "delete_files": {"min_risk_level": RiskCategory.CATEGORY_D, "requires_approval": True, "allowed": False},
+    "format_disk": {"min_risk_level": RiskCategory.CATEGORY_D, "requires_approval": True, "allowed": False},
+    "system_shell": {"min_risk_level": RiskCategory.CATEGORY_D, "requires_approval": True, "allowed": False},
+    "execute_script": {"min_risk_level": RiskCategory.CATEGORY_D, "requires_approval": True, "allowed": False},
+}
+
+_RISK_RANK: Dict[RiskCategory, int] = {
+    RiskCategory.CATEGORY_A: 1,
+    RiskCategory.CATEGORY_B: 2,
+    RiskCategory.CATEGORY_C: 3,
+    RiskCategory.CATEGORY_D: 4,
+}
+
+
+# =============================================================================
 # Custom Exception Hierarchy
 # =============================================================================
 
@@ -387,7 +412,7 @@ class LLMClientAdapter(BaseLLMClient):
 
     def validate_output(self, raw_output: Any, request: ReasoningRequest) -> ReasoningResult:
         """
-        Validate provider output against the ReasoningResult schema.
+        Validate provider output against the ReasoningResult schema and enforce action policies.
 
         Accepts:
         - ReasoningResult instance (verified for schema integrity and matching request_id).
@@ -402,6 +427,15 @@ class LLMClientAdapter(BaseLLMClient):
         - Whitespace-only or over-length response_text.
         - Sources whose source_id is not present in request's context_items (grounding check).
         - Payloads violating PRD Section 18 safety policies.
+
+        Output Policy Correction:
+        - When an action is requested, checks ACTION_POLICY for the action_type.
+        - Corrects and elevates risk_level to ACTION_POLICY[action]["min_risk_level"] if
+          the model returned an under-classified risk rank.
+        - Forces requires_approval=True if mandated by ACTION_POLICY or if the resulting
+          risk level is Category C (Sensitive) or Category D (Destructive).
+        - Model-supplied risk_level and requires_approval values are never blindly trusted.
+        - Disallowed or unsupported actions are subsequently rejected by WorkflowProposal handoff.
 
         Raises:
             LLMValidationError: If validation fails for any reason.
@@ -455,9 +489,65 @@ class LLMClientAdapter(BaseLLMClient):
                 f"Provider response_text length ({len(result.response_text)}) exceeds maximum allowed ({max_len})."
             )
 
-        # Grounding check: each cited source_id must correspond to a context_item in the request
+        # Grounding check: each cited source_id must correspond to a genuine context item in the request
         if result.sources:
-            valid_ids = {item.item_id for item in request.context_items}
+            valid_ids = set()
+            for item in request.context_items:
+                is_corrupted = False
+                has_genuine_source_ref = False
+
+                if isinstance(item.metadata, dict):
+                    src_ref = item.metadata.get("source_reference")
+                    meta_src_id = item.metadata.get("source_id")
+
+                    if src_ref is not None:
+                        if not isinstance(src_ref, dict):
+                            is_corrupted = True
+                        else:
+                            ref_src_id = src_ref.get("source_id")
+                            ref_src_type = src_ref.get("source_type")
+                            if not ref_src_id or not isinstance(ref_src_id, str) or not ref_src_type:
+                                is_corrupted = True
+                            # pyrefly: ignore[unnecessary-type-conversion]
+                            elif meta_src_id is not None and str(meta_src_id) != str(ref_src_id):
+                                # Conflicting source_reference and source_id metadata
+                                is_corrupted = True
+                            elif (
+                                item.screen_context
+                                and item.screen_context.frame_id
+                                and ref_src_type == "screen"
+                                # pyrefly: ignore[unnecessary-type-conversion]
+                                and str(item.screen_context.frame_id) != str(ref_src_id)
+                            ):
+                                # Frame ID contradicts source_reference source_id
+                                is_corrupted = True
+                            else:
+                                has_genuine_source_ref = True
+                                # pyrefly: ignore[unnecessary-type-conversion]
+                                valid_ids.add(str(ref_src_id))
+                    elif meta_src_id is not None and isinstance(meta_src_id, str):
+                        if (
+                            item.screen_context
+                            and item.screen_context.frame_id
+                            # pyrefly: ignore[unnecessary-type-conversion]
+                            and str(item.screen_context.frame_id) != str(meta_src_id)
+                        ):
+                            is_corrupted = True
+                        else:
+                            has_genuine_source_ref = True
+                            valid_ids.add(meta_src_id)
+
+                # Do not silently repair corrupted metadata; do not fall back to item_id or frame_id
+                if is_corrupted:
+                    continue
+
+                # If NO genuine attached SourceReference exists, allow item.item_id and screen_context.frame_id
+                # (Preserves Week 1/2 tests where items have item_id without separate SourceReference)
+                if not has_genuine_source_ref:
+                    valid_ids.add(item.item_id)
+                    if item.screen_context and item.screen_context.frame_id:
+                        valid_ids.add(item.screen_context.frame_id)
+
             ungrounded = [
                 s.source_id for s in result.sources
                 if s.source_id not in valid_ids
@@ -467,6 +557,23 @@ class LLMClientAdapter(BaseLLMClient):
                     f"Provider cited source_id(s) not present in request context_items: {ungrounded}. "
                     "All cited sources must be grounded in provided context."
                 )
+
+        # Output-side prompt-injection and action policy enforcement
+        if result.action_required and result.action_type:
+            action = result.action_type
+            if action in ACTION_POLICY:
+                policy = ACTION_POLICY[action]
+                min_risk = policy["min_risk_level"]
+                current_rank = _RISK_RANK.get(result.risk_level, 0)
+                min_rank = _RISK_RANK.get(min_risk, 0)
+                new_risk = min_risk if current_rank < min_rank else result.risk_level
+                new_approval = (
+                    result.requires_approval
+                    or policy.get("requires_approval", False)
+                    or new_risk in (RiskCategory.CATEGORY_C, RiskCategory.CATEGORY_D)
+                )
+                if new_risk != result.risk_level or new_approval != result.requires_approval:
+                    result = result.model_copy(update={"risk_level": new_risk, "requires_approval": new_approval})
 
         return result
 

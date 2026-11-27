@@ -28,7 +28,7 @@ from voice_stt.fixtures import (
     get_fixture,
     get_all_fixtures,
 )
-from voice_stt.fake_transcriber import DeterministicFakeTranscriber
+from voice_stt.fake_transcriber import DeterministicFakeTranscriber, ScriptedTranscriber
 from voice_stt.accumulator import OrderedSegmentAccumulator
 
 __all__ = [
@@ -47,5 +47,6 @@ __all__ = [
     "get_fixture",
     "get_all_fixtures",
     "DeterministicFakeTranscriber",
+    "ScriptedTranscriber",
     "OrderedSegmentAccumulator",
 ]

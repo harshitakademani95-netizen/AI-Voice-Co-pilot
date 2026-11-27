@@ -249,6 +249,7 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             self._current_word_idx += 1
 
             is_last_in_script = (self._current_script_idx == len(self.script) - 1 and audio.is_last)
+            # pyrefly: ignore[unnecessary-type-conversion]
             is_sentence_complete = bool(self._current_word_idx >= len(tokens) or audio.is_last or is_last_in_script)
 
             if not is_sentence_complete and self.config.interim_results:
@@ -418,3 +419,69 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             self._sentence_start = None
 
         return events
+
+
+class ScriptedTranscriber(BaseSTTAdapter):
+    """
+    Deterministic scripted STT adapter for integration testing and demos.
+    Transcribes audio chunks into a predetermined transcript string without external APIs.
+    """
+
+    def __init__(
+        self,
+        scripted_text: str = "check task status for audit",
+        config: Optional[STTAdapterConfig] = None,
+    ) -> None:
+        super().__init__(config=config)
+        self.scripted_text = scripted_text
+
+    def reset(self) -> None:
+        """Reset internal sequence counters and pointers to ensure repeatability."""
+        self._chunks_processed = 0
+        self._events_emitted = 0
+        self._state = STTAdapterState.READY
+
+    def transcribe_chunk(
+        self,
+        chunk: AudioChunk | bytes,
+        is_last: bool = False,
+    ) -> List[TranscriptEvent]:
+        self._chunks_processed += 1
+        self._state = STTAdapterState.PROCESSING
+        events: List[TranscriptEvent] = []
+
+        if is_last:
+            seg_id = f"seg-{hashlib.sha256(self.scripted_text.encode()).hexdigest()[:8]}"
+            seg = TranscriptSegment(
+                segment_id=seg_id,
+                text=self.scripted_text,
+                start_time=0.0,
+                end_time=0.5,
+                confidence=0.99,
+                is_final=True,
+                language="en",
+            )
+            self._events_emitted += 1
+            events.append(
+                TranscriptEvent(
+                    event_id=f"evt-{self._events_emitted:04d}",
+                    event_type=TranscriptEventType.FINAL,
+                    sequence_number=self._events_emitted,
+                    timestamp=0.5,
+                    session_id=self._session_id,
+                    segment=seg,
+                )
+            )
+            self._events_emitted += 1
+            events.append(
+                TranscriptEvent(
+                    event_id=f"evt-{self._events_emitted:04d}",
+                    event_type=TranscriptEventType.STREAM_COMPLETED,
+                    sequence_number=self._events_emitted,
+                    timestamp=0.5,
+                    session_id=self._session_id,
+                )
+            )
+            self._state = STTAdapterState.READY
+        return events
+

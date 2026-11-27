@@ -17,6 +17,7 @@ Description:
 """
 
 import html
+import re
 from typing import Any, Dict, List, Optional
 from src.context.schemas import ContextItem
 
@@ -25,16 +26,43 @@ def _sanitize_untrusted(text: Any) -> str:
     """
     Sanitize untrusted external text to prevent XML boundary escape injection.
     Escapes &, <, >, ", and ' using html.escape with quote=True.
-    Also neutralizes section headers so the rendered prompt contains each
-    trusted header exactly once.
+    Neutralizes section headers, code fences, fullwidth/homoglyph brackets,
+    zero-width characters, and fake role markers so the rendered
+    prompt maintains strict trusted-system boundary integrity.
     """
     if text is None:
         return ""
     if not isinstance(text, str):
         text = str(text)
-    escaped = html.escape(text, quote=True)
-    # Neutralize section headers if present in untrusted text
+
+    # 1. Strip zero-width and invisible characters
+    cleaned = re.sub(r"[\u200b\u200c\u200d\ufeff\u2060\u00ad]", "", text)
+
+    # 2. Normalize fullwidth and homoglyph brackets
+    bracket_map = {
+        "［": "[", "］": "]",
+        "【": "[", "】": "]",
+        "〔": "[", "〕": "]",
+        "⟦": "[", "⟧": "]",
+        "「": "[", "」": "]",
+    }
+    for k, v in bracket_map.items():
+        cleaned = cleaned.replace(k, v)
+
+    # 3. HTML entity escape XML/HTML delimiters (&, <, >, ", ')
+    escaped = html.escape(cleaned, quote=True)
+
+    # 4. Neutralize section headers and markdown code fences
     escaped = escaped.replace("###", "&#35;&#35;&#35;")
+    escaped = escaped.replace("```", "&#96;&#96;&#96;")
+
+    # 5. Neutralize bracketed role spoofing markers like [SYSTEM], [DEVELOPER], [ADMIN], [ASSISTANT], [USER]
+    escaped = re.sub(
+        r"\[\s*(SYSTEM|DEVELOPER|ADMIN|USER|ASSISTANT|INSTRUCTION|PROMPT)\s*\]",
+        lambda m: f"&#91;{m.group(1)}&#93;",
+        escaped,
+        flags=re.IGNORECASE,
+    )
     return escaped
 
 
@@ -85,6 +113,13 @@ class PromptTemplate:
 
                 prompt_parts.append(f'  <context_item id="{safe_id}" type="{safe_type}" source="{safe_source}">')
                 prompt_parts.append(f"    <content>\n{safe_content}\n    </content>")
+                if item.metadata:
+                    safe_meta = []
+                    for k, v in sorted(item.metadata.items(), key=lambda x: str(x[0])):
+                        safe_k = _sanitize_untrusted(str(k))
+                        safe_v = _sanitize_untrusted(str(v))
+                        safe_meta.append(f'{safe_k}="{safe_v}"')
+                    prompt_parts.append(f'    <metadata {" ".join(safe_meta)}/>')
                 if item.screen_context:
                     sc = item.screen_context
                     safe_frame = _sanitize_untrusted(sc.frame_id)

@@ -1,4 +1,4 @@
-# AI Voice Co-Pilot (Week 1 Foundation & Vertical Slice)
+# AI Voice Co-Pilot (Weeks 1–3 Foundation, Pipeline & Reasoning Engine)
 
 **Team:** SDE 3  
 **Status:** Integrated & Passing  
@@ -72,7 +72,7 @@ This module delivers the **Week 1 foundation and first vertical slice** for the 
 Before running any commands, open your terminal (PowerShell, Command Prompt, or the integrated terminal in VS Code / Antigravity IDE) and navigate to the project root directory:
 
 ```powershell
-cd "C:\Users\HARSHITA G\OneDrive\Desktop\AI Voice Bot"
+cd projects/sde-3-voicebot
 ```
 
 To confirm you are in the correct directory, check that `src/`, `tests/`, and `README.md` are listed:
@@ -954,6 +954,153 @@ Status: ALL TESTS PASSED [OK]
 | `ReasoningResult.requires_approval` | `requires_approval` | Human-in-the-loop gate required |
 
 ---
+
+## W3-6. Week 2 Architecture & Advanced Reasoning Pipeline
+
+Week 2 extends the Context and Reasoning Layer with an end-to-end, multi-stage pipeline:
+
+```text
+[Opt-In Screen Capture] -> [OCR/Vision Adapter] -> [Bounded Context Builder] -> [Hardened Prompt] -> [LLM Client Adapter]
+  (OptInCaptureAdapter)      (MockVisionAdapter)       (BoundedContextBuilder)     (PromptRegistry)       (LLMClientAdapter)
+   - Default disabled        - Synthetic only         - Freshness filtering      - Untrusted XML tags   - Timeout ceiling
+   - Consent gate            - Schema translation     - Keyword scoring (TF)     - Escape entities      - Exponential retry
+   - max_fps rate limit      - Deterministic          - Token budget bounds      - System instructions  - Schema validation
+```
+
+### Component Files & Responsibilities
+
+| Component | File | Responsibilities |
+| :--- | :--- | :--- |
+| **Capture Adapter** | `src/context/capture_adapter.py` | Opt-in safety gating, `max_fps` rate limiting, frame resolution and text length boundaries, synthetic `ScreenContext` generation. |
+| **Vision Adapter** | `src/context/vision_adapter.py` | Abstract `BaseVisionAdapter` and `MockVisionAdapter`. Transforms synthetic screen frames into ingested `ContextItem` objects. |
+| **Bounded Context Builder** | `src/context/bounded_builder.py` | Freshness filtering (`max_age_seconds`), deterministic keyword relevance scoring, recency tie-breaking, and token budget ceiling enforcement. |
+| **Versioned Prompts** | `src/prompts/versioned_prompts.py` | Prompt template registration, versioning (`v1.0.0`), strict boundary isolation enclosing untrusted context in `<untrusted_context>` tags. |
+| **LLM Client Adapter** | `src/reasoning/llm_client.py` | `BaseLLMClient`, `MockLLMClient`, and `LLMClientAdapter`. Configurable timeouts, bounded exponential backoff retries, structured output schema validation, and `reason_safe()`. |
+| **End-to-End Demo** | `demo_week2.py` | Demonstrates all 7 pipeline phases 100% offline, deterministically, with honest comparative evidence (staleness and token budget proofs, timeout fast-fail substep 5.3, exponential backoff verification, and prompt marker validation). |
+
+### System Limits & Default Values
+
+| Configuration Parameter | Default Value | Enforcing Class | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled_by_default` | `False` | `CaptureConfig` | Explicit user opt-in required prior to frame capture. |
+| `max_fps` | `2.0` | `CaptureConfig` | Rate limit ceiling (at most 1 frame per 0.5s). |
+| `max_width` | `1920` | `CaptureConfig` | Maximum allowed screen width in pixels. |
+| `max_height` | `1080` | `CaptureConfig` | Maximum allowed screen height in pixels. |
+| `max_text_length` | `100,000` | `CaptureConfig` | Maximum allowable visible OCR text length in characters. |
+| `max_items` | `50` | `BoundedContextConfig` | Maximum number of context items allowed (caps at ReasoningRequest limit of 50). |
+| `token_budget` | `2000` | `BoundedContextConfig` | Approximate token ceiling for context window admission. |
+| `chars_per_token` | `4.0` | `BoundedContextConfig` | Transparent heuristic ratio (ceil(chars / 4.0)). |
+| `max_age_seconds` | `None` | `BoundedContextConfig` | Max item age relative to reference time; older items are dropped as stale. |
+| `provider` | `"mock"` | `LLMClientConfig` | Offline provider backend. Non-mock providers rejected offline. |
+| `timeout_seconds` | `30.0` | `LLMClientConfig` | Request execution timeout ceiling. |
+| `max_retries` | `3` | `LLMClientConfig` | Maximum retry attempts on transient network or 5xx/429 errors. |
+| `retry_delay_seconds` | `0.05` | `LLMClientConfig` | Initial delay before the first retry. |
+| `backoff_multiplier` | `2.0` | `LLMClientConfig` | Exponential multiplier applied across successive retries. |
+| `retry_on_timeout` | `True` | `LLMClientConfig` | Whether execution timeouts are treated as retryable transient errors. |
+
+### How Timeout & Retry Work
+
+1. **Timeout Ceiling**: Requests are executed within `timeout_seconds` using a managed daemon worker thread. A timed-out provider call is abandoned (not cancelled), runs on a daemon thread so process exit is never blocked, and bounded retries limit concurrent abandoned calls. If execution exceeds this ceiling, `LLMTimeoutError` is raised.
+2. **Transient vs Non-Transient Classification**:
+   - **Transient (Retryable)**: `LLMTransientError` (HTTP 503, 429 rate limits) and `LLMTimeoutError` (when `retry_on_timeout=True`).
+   - **Non-Transient (Fast-Fail)**: `LLMValidationError` (schema mismatch), `LLMAuthenticationError` (bad credentials), `LLMConfigurationError` (invalid provider), and standard Python `TypeError` / `ValueError` / `KeyError`. These fail immediately without retrying.
+3. **Exponential Backoff**: Successive retries sleep for `retry_delay_seconds * (backoff_multiplier ** attempt)`. In unit tests and simulations, an injectable `sleeper` callable records delays without sleeping real clock cycles.
+
+### Safety Guarantees & Architectural Notes
+
+- **Opt-In Capture & Safety Invariant**: Disabled on initialization; `capture_frame()` raises `CapturePermissionError` unless `opt_in()` has been called.
+  > **Note on `capture_enabled`**: `capture_enabled=False means real OS screen capture is never engaged in this project; is_opted_in tracks user consent.` Even after `adapter.opt_in()`, all frames remain synthetic (`is_synthetic=True`, `capture_enabled=False`).
+- **Zero Real Hardware Access**: Strictly generates synthetic frames (`is_synthetic=True`, `capture_enabled=False`). No native screen-grabbing libraries (`mss`, `pyautogui`, etc.) are imported.
+- **Untrusted Context Isolation**: Untrusted context is encapsulated in `<untrusted_context>` blocks with HTML escaping to prevent prompt injection attacks.
+- **Credential Protection**: API keys are redacted (`'[REDACTED]'`) in `__repr__` and string representations to prevent secret leaks in logs.
+- **Resilient Fallback**: `reason_safe()` catches all internal exceptions and returns a validated `ReasoningResult(status="error")` bounded to <= 10,000 characters with zero raw input leaks and zero unhandled crashes.
+- **Context Window Budgeting & Lower-Relevance Admission**:
+  > **Note on Zero/Lower-Relevance Admission**: `BoundedContextBuilder` greedily admits items in descending priority order (Relevance -> Recency -> ID). If high-relevance items do not consume the entire `token_budget`, remaining lower-relevance or zero-relevance candidate items will be admitted up to `max_items` (ceiling 50) and `token_budget`. To restrict admission to strictly relevant items, callers can pre-filter candidates before building, configure a tighter `token_budget`, or supply a smaller candidate pool.
+
+### How to Run Week 2 Pipeline & Tests
+
+```powershell
+# Run the 7-phase Week 2 demonstration
+python demo_week2.py
+
+# Run Week 2 unit tests directly via unittest (165 tests)
+python -m unittest tests/test_bounded_builder.py tests/test_llm_client.py tests/test_mock_reasoning.py tests/test_prompts.py tests/test_context_schemas.py tests/test_synthetic.py tests/test_capture_adapter.py tests/test_demo_week2.py -v
+```
+
+### W3 Week 2 Test Suite Verification
+```text
+Ran 165 tests in 0.221s
+OK (All 165 Week 2 W3 tests passing across 8 test modules)
+```
+
+---
+
+## W3-7. Week 3 Architecture, Handoff & Security Pipeline
+
+Week 3 completes the W3 Context & Reasoning Engine milestone, integrating source-linked observations, strict prompt-injection defenses, grounded answer evidence checks, schema-validated WorkflowProposal handoff to W4, and human-in-the-loop approval gating.
+
+### Modules Added in Week 3
+
+| Module / File | Description |
+| :--- | :--- |
+| `src/context/observation_generator.py` | Generates timestamped, source-linked `Observation` instances with immutable provenance, fingerprinting, and duplicate/stale detection. |
+| `src/reasoning/workflow_handoff.py` | Schema-validated adapter translating `ReasoningResult` into `WorkflowProposal`, mapping approved actions (`check_task`, `generate_report`) to W4 mock tools, enforcing mandatory human approvals for Category C/D operations, and rejecting destructive actions. |
+| `demo_week3.py` | End-to-end 8-phase vertical slice demonstration: voice ingestion, opt-in capture & consent lifecycle, observation generation, bounded windowing, prompt injection defense, grounded answers, workflow proposal handoff, and human-gated mock execution. |
+| `tests/test_observations.py` | Acceptance tests for timestamped observations, timezone-aware verification, and provenance preservation (12 tests). |
+| `tests/test_grounded_answers.py` | Acceptance tests for exact citation validation, relevance selection, and honest clarification on empty or irrelevant context (12 tests). |
+| `tests/test_prompt_injection_security.py` | Acceptance tests for prompt boundary escaping, entity encoding, hostile provider output enforcement, unknown action rejection, approval gate enforcement, and neutralizing injected screen/user commands as passive data (21 tests). |
+| `tests/test_consent_withdrawal.py` | Dedicated privacy suite for opt-in enforcement, immediate consent withdrawal, context buffer purge, hash/cache invalidation, and rate-limit reset (4 tests). |
+| `tests/test_server_api_validation.py` | Dedicated server HTTP validation tests for Content-Type 415, query validation 400, scenario validation 400, and workflow proposal generation (5 tests). |
+| `tests/test_no_evidence_responses.py` | Tests for honest uncertainty wording on empty, irrelevant, or partial evidence, citing only supported sources (4 tests). |
+| `tests/test_workflow_handoff.py` | Acceptance tests for `WorkflowProposal` construction, DAG validation, risk mapping, single-use approvals, and rejection of dangerous actions (14 tests). |
+| `tests/test_final_integration.py` | Full end-to-end pipeline integration scenarios across voice, screen, reasoning, handoff, and approval gating (8 tests). |
+| `tests/test_demo_week3.py` | Integrity and byte-for-byte stdout determinism tests for `demo_week3.py` (2 tests). |
+
+### Risk Mapping: W3 Context & Reasoning to W4 Workflow Engine
+
+| W3 RiskCategory | W3 Description | W4 RiskLevel | Human Approval Gate | Allowed Mock Tools |
+| :--- | :--- | :--- | :--- | :--- |
+| **Category A** | Read-Only / Passive Info | `informational` | No (Automatic) | Read-only queries |
+| **Category B** | Low Risk / Reversible Action | `low` | No (Automatic) | `mock_task_checker` |
+| **Category C** | Sensitive / File Manipulation | `sensitive` | **Yes (Mandatory)** | `mock_report_generator` |
+| **Category D** | Critical / Destructive / Shell | `critical` | **Yes (Mandatory)** | None (Strictly Rejected) |
+
+### Action Policy Table (Output-Side Prompt Injection Enforcement)
+
+| Action Type (`action_type`) | Minimum Risk Category (`min_risk_level`) | Approval Required (`requires_approval`) | Allowed in Mock Mode (`allowed`) | Mapped W4 Tool |
+| :--- | :--- | :--- | :--- | :--- |
+| `check_task` | Category B (Low) | No | **True** | `mock_task_checker` |
+| `generate_report` | Category C (Sensitive) | **Yes** | **True** | `mock_report_generator` |
+| `move_files` | Category C (Sensitive) | **Yes** | False | None (Disallowed) |
+| `archive_files` | Category C (Sensitive) | **Yes** | False | None (Disallowed) |
+| `rename_files` | Category C (Sensitive) | **Yes** | False | None (Disallowed) |
+| `search_workspace` | Category B (Low) | No | False | None (Disallowed) |
+| `delete_files` | Category D (Destructive) | **Yes** | False | None (Disallowed) |
+| `format_disk` | Category D (Destructive) | **Yes** | False | None (Disallowed) |
+| `system_shell` | Category D (Destructive) | **Yes** | False | None (Disallowed) |
+| `execute_script` | Category D (Destructive) | **Yes** | False | None (Disallowed) |
+
+### How to Run Week 3 Pipeline & Tests
+
+```powershell
+# Run the 8-phase Week 3 demonstration (100% offline & deterministic)
+python demo_week3.py
+
+# Run all 301 dedicated W3 acceptance unit tests
+python run_tests.py --w3-only
+```
+
+### W3 Week 3 Test Suite Verification (Real Test Counts)
+- **Step 0 Audit Baseline**: 279 passed, 0 failures, 0 errors (across 15 test suites).
+- **Final Integration & Hardened Acceptance Suite**: **301 passed, 0 failures, 0 errors** (across 18 test suites).
+- **Status**: `ALL TESTS PASSED [OK]` (in ~0.4s).
+
+### Honest Architectural Boundaries & Limitations
+- **Mock Reasoning Engine**: Uses deterministic keyword-based heuristics, regex classifiers, and deterministic hashing for latency simulation. It is not a live cloud or local neural LLM.
+- **Synthetic Visual Context**: Uses programmatic `ScreenContext` synthetic frames with strict `is_synthetic=True` and `capture_enabled=False` guarantees. No real OS screen capture, display scraping, or GPU vision models are used.
+- **Harmless In-Memory Tools**: The W4 execution integration runs strictly against harmless mock tools (`mock_task_checker`, `mock_report_generator`). No filesystem deletion, disk modification, or shell execution is performed.
+- **Deterministic Voice Transcription**: `demo_week3.py` executes the `ScriptedTranscriber` (subclassing `BaseSTTAdapter`) on the raw `AudioChunk` to produce schema-validated `TranscriptEvent`s deterministically. Note that `ScriptedTranscriber` is a deterministic mock that emits scripted text regardless of audio bytes, and real acoustic STT is out of scope for mock mode.
+
 ---
 
 # Part 4: Workstream W5 – Backend & Sessions

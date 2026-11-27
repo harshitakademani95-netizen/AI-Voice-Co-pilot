@@ -65,6 +65,29 @@ class SourceReference(BaseModel):
     )
 
 
+class Observation(BaseModel):
+    """
+    Day 15: Structured, timestamped observation linked to a verifiable source reference.
+    Represents an atomic perception unit derived from workspace visual or context stimuli.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    observation_id: str = Field(..., min_length=1, description="Unique, traceable observation identifier.")
+    timestamp: datetime = Field(..., description="Timezone-aware UTC timestamp when observation occurred.")
+    source: SourceReference = Field(..., description="Mandatory source reference grounding this observation.")
+    content: str = Field(..., min_length=1, max_length=100_000, description="Informational observation content extracted from context.")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary structured metadata dictionary.")
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_tz(cls, v: datetime) -> datetime:
+        return _ensure_timezone_aware(v, "timestamp")
+
+    def to_context_item(self, item_id: Optional[str] = None) -> "ContextItem":
+        """Transform this Observation into an ingested ContextItem."""
+        return observation_to_context_item(self, item_id=item_id)
+
+
 ALLOW_REAL_FRAMES = False
 
 
@@ -135,6 +158,27 @@ class ContextItem(BaseModel):
     @classmethod
     def validate_timestamp_tz(cls, v: datetime) -> datetime:
         return _ensure_timezone_aware(v, "timestamp")
+
+
+def observation_to_context_item(obs: Observation, item_id: Optional[str] = None) -> ContextItem:
+    """
+    Transform an Observation into a schema-compliant ContextItem for downstream reasoning.
+    Preserves source provenance, timestamp, and metadata.
+    """
+    c_type = ContextType.SCREEN if obs.source.source_type == "screen" else ContextType.APPLICATION
+    return ContextItem(
+        item_id=item_id or f"ctx-{obs.observation_id}",
+        context_type=c_type,
+        source=obs.source.reference_location or obs.source.source_id,
+        content=obs.content,
+        timestamp=obs.timestamp,
+        metadata=dict(
+            obs.metadata,
+            observation_id=obs.observation_id,
+            source_id=obs.source.source_id,
+            source_reference=obs.source.model_dump(),
+        ),
+    )
 
 
 class ReasoningRequest(BaseModel):
