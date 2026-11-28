@@ -128,7 +128,12 @@ class WordTiming(BaseModel):
 
 
 class STTErrorDetail(BaseModel):
-    """Standardized error structure conforming to API Specifications & Interface Contracts (doc 04), Section 5.
+    """Standardized STT domain error structure conforming to API Specifications & Interface Contracts (doc 04), Section 5.
+
+    Architectural Role:
+    This model represents domain-level speech-to-text pipeline failures, transcript event error
+    payloads, and adapter diagnostics. It is distinct from the W5 backend HTTP REST error envelope
+    (`ErrorPayload` in `src/models/error.py`), but provides seamless conversion via `to_error_payload()`.
 
     Attributes:
         code: Machine-readable error code (e.g., 'INVALID_PAYLOAD', 'AUDIO_DECODE_FAILED').
@@ -179,6 +184,11 @@ class STTErrorDetail(BaseModel):
                 "details": self.details,
             }
         }
+
+    def to_error_payload(self, correlation_id: Optional[str] = None) -> Any:
+        """Convert domain STTErrorDetail to W5 Backend typed ErrorPayload."""
+        from src.models.error import ErrorPayload
+        return ErrorPayload.from_stt_error(self, correlation_id=correlation_id)
 
     @field_validator("message")
     @classmethod

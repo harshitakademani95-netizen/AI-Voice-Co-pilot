@@ -180,6 +180,7 @@ class InMemorySessionRepository:
         session_id: str,
         event_type: str,
         payload: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> SessionEvent:
         """Adds a mock or runtime event to an active session."""
         with self._lock:
@@ -205,6 +206,9 @@ class InMemorySessionRepository:
             session.events.append(event)
             session.updated_at = now_iso
             return event.model_copy(deep=True)
+
+    # Alias for compatibility with team variants and alternative W5 specs
+    record_event = add_event
 
     def delete(self, session_id: str) -> bool:
         """Removes a session by ID."""

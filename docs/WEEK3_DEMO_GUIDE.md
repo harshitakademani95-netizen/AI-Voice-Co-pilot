@@ -2,7 +2,7 @@
 
 **Project:** AI Voice Co-Pilot  
 **Workstream:** SDE 3 — Speech-to-Text Subsystem  
-**Target Branch:** `feature/w2-speech-to-text-1`  
+**Target Branch:** `feature/w2-speech-to-text-2`
 **Execution Environment:** Windows 11 (PowerShell / Command Prompt)
 
 This guide provides step-by-step instructions for evaluating the Week 3 speech-to-text features entirely in **mock mode**. No physical microphone, external cloud network access, or paid API credentials are required.
@@ -19,7 +19,7 @@ cd "C:\Users\Disha D K\OneDrive\Desktop\AI Voice Co-Pilot"
 
 # Verify active branch
 git branch --show-current
-# Expected output: feature/w2-speech-to-text-1
+# Expected output: feature/w2-speech-to-text-2
 
 # Verify virtual environment Python
 .\.venv\Scripts\python.exe --version
@@ -28,7 +28,29 @@ git branch --show-current
 
 ---
 
-## 2. Interactive Mock Demonstration Script
+## 2. Dedicated Week 3 Demonstration Script (Recommended)
+
+Run the dedicated Week 3 integration demo covering all 10 core integration, resilience, and lifecycle scenarios:
+
+```powershell
+.\.venv\Scripts\python.exe examples/week3_stt_integration_demo.py
+```
+
+This automated demo executes 100% offline and verifies:
+1. Audio pipeline chunk capture and VAD detection.
+2. Interim transcription hypothesis generation.
+3. Transcript revision replacing tentative interim words.
+4. Transcript finalization committing immutable text.
+5. Session ID isolation and foreign session event rejection.
+6. Low-confidence segment handling and defensive quarantine.
+7. Cooperative cancellation of an in-flight transcription session.
+8. Simulated network failure and automatic mock fallback.
+9. Simulated HTTP 429 quota failure and automatic mock fallback.
+10. End-to-end streaming of transcript events into the backend session repository.
+
+---
+
+## 3. Interactive Mock Demonstration Script
 
 We provide an interactive demo walkthrough script using Python's interactive session or standalone script to showcase all 9 core capabilities.
 

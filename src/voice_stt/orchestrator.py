@@ -209,16 +209,20 @@ class OrchestratorCancelledError(RuntimeError):
 def is_supported_fallback_error(exc: Exception, error_detail: Optional[STTErrorDetail] = None) -> bool:
     """Determine whether an error qualifies for automatic mock provider fallback.
 
-    Supported provider failure scenarios:
-    1. API quota exceeded (e.g. QUOTA_EXCEEDED, RATE_LIMITED, 429, insufficient quota).
-    2. Network connection failure (e.g. ConnectionError, connection reset/refused).
-    3. Provider unavailable or temporary service failure (e.g. SERVICE_UNAVAILABLE, 503, timeout).
+    Recognized provider failure scenarios (via structured types, codes, and attributes):
+    1. HTTP 429 / quota / rate-limit errors.
+    2. Network connection failures (connection resets, connection refusals, broken pipes).
+    3. HTTP 503 / provider service unavailable / temporary service failures.
+    4. Timeouts after retry exhaustion.
 
     Explicitly excluded from fallback (never masked):
-    - Validation errors (STTValidationError, VALIDATION_ERROR, INVALID_PAYLOAD).
-    - Programming errors (ValueError, TypeError, KeyError, AttributeError, NameError, AssertionError).
-    - Operational lifecycle states (OrchestratorClosedError, OrchestratorCancelledError).
+    - Programming errors (ValueError, TypeError, KeyError, IndexError, AttributeError, NameError, AssertionError, NotImplementedError).
+    - Invalid input & validation failures (STTValidationError, INVALID_PAYLOAD, VALIDATION_ERROR, BAD_REQUEST).
+    - Unsupported configurations (UNSUPPORTED_CONFIGURATION, CONFIGURATION_ERROR).
+    - Authentication & authorization failures (UNAUTHENTICATED, UNAUTHORIZED, FORBIDDEN, PERMISSION_DENIED).
+    - Operational lifecycle states (OrchestratorClosedError, OrchestratorCancelledError, ADAPTER_CLOSED, OPERATION_CANCELLED).
     """
+    # 1. Reject explicit programming and lifecycle exceptions immediately
     if isinstance(
         exc,
         (
@@ -226,37 +230,132 @@ def is_supported_fallback_error(exc: Exception, error_detail: Optional[STTErrorD
             ValueError,
             TypeError,
             KeyError,
+            IndexError,
             AttributeError,
             NameError,
             AssertionError,
+            NotImplementedError,
+            SyntaxError,
+            LookupError,
             OrchestratorClosedError,
             OrchestratorCancelledError,
         ),
     ):
         return False
 
-    code = error_detail.code.upper() if error_detail else ""
-    msg = (error_detail.message if error_detail else str(exc)).lower()
+    # 2. Extract structured codes and HTTP statuses
+    code = (error_detail.code.upper() if error_detail else "") or getattr(exc, "code", "").upper()
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status_code is None and error_detail and error_detail.details:
+        status_code = error_detail.details.get("status_code") or error_detail.details.get("http_status")
 
-    if code in ("VALIDATION_ERROR", "INVALID_PAYLOAD", "ADAPTER_CLOSED", "OPERATION_CANCELLED"):
+    # 3. Reject excluded structured error codes and HTTP client failure statuses
+    excluded_codes = {
+        "VALIDATION_ERROR",
+        "INVALID_PAYLOAD",
+        "INVALID_INPUT",
+        "INVALID_ARGUMENT",
+        "BAD_REQUEST",
+        "UNSUPPORTED_CONFIGURATION",
+        "CONFIGURATION_ERROR",
+        "UNAUTHENTICATED",
+        "UNAUTHORIZED",
+        "PERMISSION_DENIED",
+        "FORBIDDEN",
+        "AUTH_ERROR",
+        "ADAPTER_CLOSED",
+        "OPERATION_CANCELLED",
+        "CANCELLED",
+        "CLOSED",
+    }
+    if code in excluded_codes:
         return False
 
-    # 1. API Quota exceeded / rate limited
-    if code in ("QUOTA_EXCEEDED", "RATE_LIMITED", "RESOURCE_EXHAUSTED"):
+    if isinstance(status_code, int) and status_code in (400, 401, 403, 404, 405, 422):
+        return False
+
+    # 4. Structured Quota / Rate-limit detection
+    if isinstance(status_code, int) and status_code == 429:
         return True
-    if "quota" in msg or "429" in msg or "rate limit" in msg:
+    if code in ("QUOTA_EXCEEDED", "RATE_LIMITED", "RESOURCE_EXHAUSTED", "HTTP_429", "TOO_MANY_REQUESTS"):
         return True
 
-    # 2. Network connection failure
-    if isinstance(exc, (ConnectionError, ConnectionResetError, ConnectionRefusedError)):
+    # 5. Structured Network failure detection
+    if isinstance(
+        exc,
+        (
+            ConnectionError,
+            ConnectionResetError,
+            ConnectionRefusedError,
+            ConnectionAbortedError,
+            BrokenPipeError,
+        ),
+    ):
         return True
-    if "connection" in msg or "network" in msg:
+    if code in (
+        "NETWORK_ERROR",
+        "CONNECTION_ERROR",
+        "CONNECTION_RESET",
+        "CONNECTION_REFUSED",
+        "SOCKET_ERROR",
+        "REMOTE_DISCONNECTED",
+    ):
         return True
 
-    # 3. Provider unavailable / temporary service failure / timeout
-    if code in ("SERVICE_UNAVAILABLE", "TRANSCRIPTION_TIMEOUT"):
+    # 6. Structured Provider Unavailable / 503 detection
+    if isinstance(status_code, int) and status_code in (502, 503, 504):
         return True
-    if "503" in msg or "unavailable" in msg or "timeout" in msg:
+    if code in ("SERVICE_UNAVAILABLE", "HTTP_503", "UNAVAILABLE", "BAD_GATEWAY", "GATEWAY_TIMEOUT"):
+        return True
+
+    # 7. Structured Timeout detection
+    if isinstance(exc, (TimeoutError, concurrent.futures.TimeoutError)):
+        return True
+    if code in ("TRANSCRIPTION_TIMEOUT", "TIMEOUT", "DEADLINE_EXCEEDED"):
+        return True
+
+    # 8. Guarded message pattern fallback for untyped third-party errors
+    msg = (error_detail.message if error_detail else str(exc)).lower()
+
+    # Never trigger on programming/auth words in message
+    if any(
+        term in msg
+        for term in (
+            "unauthorized",
+            "forbidden",
+            "invalid argument",
+            "validation error",
+            "cancelled",
+            "canceled",
+            "closed",
+            "unsupported",
+        )
+    ):
+        return False
+
+    if any(term in msg for term in ("quota", "429", "rate limit", "resource exhausted", "insufficient_quota")):
+        return True
+
+    if any(
+        term in msg
+        for term in (
+            "connection reset",
+            "connection refused",
+            "connection failed",
+            "connection error",
+            "network unreachable",
+            "network error",
+            "network failure",
+            "connection abort",
+            "remote end closed",
+        )
+    ):
+        return True
+
+    if any(term in msg for term in ("503", "service unavailable", "provider unavailable")):
+        return True
+
+    if any(term in msg for term in ("timed out", "timeout", "deadline exceeded")):
         return True
 
     return False

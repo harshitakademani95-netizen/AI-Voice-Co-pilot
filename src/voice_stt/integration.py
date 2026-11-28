@@ -119,6 +119,7 @@ class BackendEventStreamBridge:
             "source_timestamp": event.timestamp,
             "sequence_number": event.sequence_number,
             "stt_event_type": event.event_type.value,
+            "session_id": target_sid,
         }
 
         if event.segment is not None:
@@ -161,11 +162,20 @@ class BackendEventStreamBridge:
                 else:
                     raise
 
-            session_evt = self.repository.add_event(
-                session_id=target_sid,
-                event_type=backend_event_type,
-                payload=payload,
-            )
+            if hasattr(self.repository, "add_event"):
+                session_evt = self.repository.add_event(
+                    session_id=target_sid,
+                    event_type=backend_event_type,
+                    payload=payload,
+                )
+            elif hasattr(self.repository, "record_event"):
+                session_evt = self.repository.record_event(
+                    session_id=target_sid,
+                    event_type=backend_event_type,
+                    payload=payload,
+                )
+            else:
+                raise AttributeError("Repository exposes neither 'add_event' nor 'record_event'.")
             self._published_event_ids.add(event.event_id)
             self._published_events.append(session_evt)
             return session_evt

@@ -2,7 +2,7 @@
 
 **Project:** AI Voice Co-Pilot  
 **Workstream:** SDE 3 (Voicebot / STT)  
-**Branch:** `feature/w2-speech-to-text-1`  
+**Branch:** `feature/w2-speech-to-text-2`
 **Base Commit:** `ef52ecc7eab14e55f02505723ed4ab6b69148703`  
 **Baseline Test Result:** 169 / 169 Tests Passing (100% Pass Rate)
 

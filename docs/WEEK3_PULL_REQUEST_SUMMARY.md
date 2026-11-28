@@ -2,7 +2,7 @@
 
 **PR Title:** `feat(voice-stt): Week 3 STT Revisions, Fallback Resilience, Audio Pipeline & Backend Event Stream Integration`  
 **Target Branch (Future):** `team/sde-3-voicebot` (or `main`)  
-**Source Branch (Current):** `feature/w2-speech-to-text-1`  
+**Source Branch (Current):** `feature/w2-speech-to-text-2`
 **Base Commit:** `ef52ecc7eab14e55f02505723ed4ab6b69148703`  
 **Status:** PR-Ready (Local Implementation & Verification Completed — Not Pushed)
 
