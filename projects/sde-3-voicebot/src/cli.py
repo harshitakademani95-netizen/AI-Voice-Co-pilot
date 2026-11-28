@@ -43,6 +43,16 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--day15",
+        action="store_true",
+        help="Run the Week 3 Day 15 Normalized Audio Events & Speech Start/End demonstration",
+    )
+    parser.add_argument(
+        "--week3",
+        action="store_true",
+        help="Alias for --day15",
+    )
+    parser.add_argument(
         "--week2",
         action="store_true",
         help="Run the Week 2 (D8-D14) Device Adapter, Lifecycle, VAD, and Buffer demonstration",
@@ -177,7 +187,13 @@ def main() -> None:
     """Entry point for CLI demo."""
     parser = create_parser()
     args = parser.parse_args()
-    if getattr(args, "week2", False):
+    if getattr(args, "week3", False):
+        from src.audio.demo import run_week3_complete_demo
+        exit_code = run_week3_complete_demo()
+    elif getattr(args, "day15", False):
+        from src.audio.demo import run_day15_events_demo
+        exit_code = run_day15_events_demo()
+    elif getattr(args, "week2", False):
         from src.cli_w2 import run_week2_demo
         exit_code = run_week2_demo()
     else:

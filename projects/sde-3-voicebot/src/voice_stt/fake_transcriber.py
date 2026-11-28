@@ -12,20 +12,36 @@ import hashlib
 import uuid
 from typing import List, Optional, Sequence
 
-from voice_stt.adapter import (
-    BaseSTTAdapter,
-    STTAdapterConfig,
-    STTAdapterState,
-)
-from voice_stt.fixtures import STTFixture, get_fixture
-from voice_stt.schemas import (
-    AudioChunk,
-    STTErrorDetail,
-    TranscriptEvent,
-    TranscriptEventType,
-    TranscriptSegment,
-    WordTiming,
-)
+try:
+    from .adapter import (
+        BaseSTTAdapter,
+        STTAdapterConfig,
+        STTAdapterState,
+    )
+    from .fixtures import STTFixture, get_fixture
+    from .schemas import (
+        AudioChunk,
+        STTErrorDetail,
+        TranscriptEvent,
+        TranscriptEventType,
+        TranscriptSegment,
+        WordTiming,
+    )
+except ImportError:
+    from voice_stt.adapter import (
+        BaseSTTAdapter,
+        STTAdapterConfig,
+        STTAdapterState,
+    )
+    from voice_stt.fixtures import STTFixture, get_fixture
+    from voice_stt.schemas import (
+        AudioChunk,
+        STTErrorDetail,
+        TranscriptEvent,
+        TranscriptEventType,
+        TranscriptSegment,
+        WordTiming,
+    )
 
 DEFAULT_VOCABULARY: Sequence[str] = (
     "explain",
@@ -143,6 +159,17 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         self._sentence_start = None
         self._last_error = None
         self._state = STTAdapterState.READY
+
+    def flush(self) -> List[TranscriptEvent]:
+        """Flush active in-flight sentence as a finalized TranscriptEvent."""
+        events: List[TranscriptEvent] = []
+        if self._active_sentence_words:
+            evt = self._flush_active_sentence(
+                chunk_start=self._sentence_start if self._sentence_start is not None else self._elapsed_time,
+                chunk_end=self._elapsed_time,
+            )
+            events.append(evt)
+        return events
 
     def transcribe_chunk(
         self,

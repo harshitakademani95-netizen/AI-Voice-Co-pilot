@@ -143,3 +143,134 @@ async def quickstart_mock_session() -> SessionResponse:
     )
     updated_session = session_repository.get(session.session_id)
     return _to_response(updated_session)
+
+
+# =============================================================================
+# Week 3 Day 21 – Integrated AudioPipeline & Agentic Workflow Routes
+# =============================================================================
+
+@router.post(
+    "/{session_id}/audio/init",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Initialize integrated AudioPipeline and STT Bridge for session",
+)
+async def init_session_audio(session_id: str) -> SessionResponse:
+    """Wires AudioPipeline and STT bridge to the existing session repository (Section 3)."""
+    from src.audio.backend_integration import audio_backend_manager
+    session = session_repository.get(session_id)
+    audio_backend_manager.init_audio_pipeline(
+        session_id=session.session_id,
+        correlation_id=session.metadata.get("correlation_id"),
+    )
+    return _to_response(session_repository.get(session_id))
+
+
+@router.post(
+    "/{session_id}/audio/process",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Process audio stream through AudioPipeline -> STT Bridge -> Repository",
+)
+async def process_session_audio(
+    session_id: str,
+    speech_chunks: int = Query(5, description="Number of speech chunks"),
+    silence_chunks: int = Query(4, description="Number of silence debounce chunks"),
+) -> SessionResponse:
+    """Executes capture -> VAD -> normalized events -> STT accumulation for session."""
+    from src.audio.backend_integration import audio_backend_manager
+    audio_backend_manager.process_audio_stream(
+        session_id=session_id,
+        speech_chunks=speech_chunks,
+        silence_chunks=silence_chunks,
+    )
+    return _to_response(session_repository.get(session_id))
+
+
+@router.post(
+    "/{session_id}/audio/reason-and-plan",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Feed audio transcript into Reasoning and derive WorkflowPlan",
+)
+async def reason_and_plan_session(session_id: str) -> SessionResponse:
+    """Invokes MockReasoningEngine and creates grounded WorkflowPlan."""
+    from src.audio.backend_integration import audio_backend_manager
+    audio_backend_manager.execute_reasoning_and_plan(session_id=session_id)
+    return _to_response(session_repository.get(session_id))
+
+
+@router.post(
+    "/{session_id}/audio/approve",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Grant human approval for pending consequential workflow step",
+)
+async def approve_session_workflow(
+    session_id: str,
+    approver: str = Query("lead-engineer@academia.ai", description="Approver identity"),
+    comment: str = Query("Approved for execution", description="Approval comment"),
+) -> SessionResponse:
+    """Approves Human-in-the-Loop gate and resumes workflow execution."""
+    from src.audio.backend_integration import audio_backend_manager
+    audio_backend_manager.approve_and_complete_workflow(
+        session_id=session_id,
+        approver=approver,
+        comment=comment,
+    )
+    return _to_response(session_repository.get(session_id))
+
+
+@router.post(
+    "/{session_id}/audio/reject",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reject pending consequential workflow step and cancel workflow",
+)
+async def reject_session_workflow(
+    session_id: str,
+    rejector: str = Query("security-auditor@academia.ai", description="Rejector identity"),
+    comment: str = Query("Disallowed operation", description="Rejection reason"),
+) -> SessionResponse:
+    """Rejects Human-in-the-Loop gate and halts workflow."""
+    from src.audio.backend_integration import audio_backend_manager
+    audio_backend_manager.reject_and_cancel_workflow(
+        session_id=session_id,
+        rejector=rejector,
+        comment=comment,
+    )
+    return _to_response(session_repository.get(session_id))
+
+@router.post(
+    "/{session_id}/audio/cancel",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Cancel active audio and workflow session",
+)
+async def cancel_session_audio(
+    session_id: str,
+    reason: str = Query("user_cancelled", description="Cancellation reason"),
+) -> SessionResponse:
+    """Cancels audio pipeline, flushes buffers, and cancels pending workflows."""
+    from src.audio.backend_integration import audio_backend_manager
+    session = session_repository.get(session_id)
+    audio_backend_manager.cancel_workflow(session_id=session.session_id, reason=reason)
+    return _to_response(session_repository.get(session_id))
+
+
+@router.post(
+    "/{session_id}/audio/cleanup",
+    response_model=SessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Clean up audio and workflow resources for session",
+)
+async def cleanup_session_audio(
+    session_id: str,
+    force: bool = Query(False, description="Force cleanup even if session is active"),
+) -> SessionResponse:
+    """Safely cleans up pipelines, bridges, and workflow plans for session (Section 8)."""
+    from src.audio.backend_integration import audio_backend_manager
+    session = session_repository.get(session_id)
+    audio_backend_manager.cleanup_session(session_id=session.session_id, force=force)
+    return _to_response(session_repository.get(session_id))
+

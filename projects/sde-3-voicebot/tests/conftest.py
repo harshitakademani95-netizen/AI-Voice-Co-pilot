@@ -1,7 +1,13 @@
 """Pytest fixtures for AI Voice Co-Pilot: STT pipeline and Backend tests."""
 
+import warnings
 from typing import List
 import pytest
+from starlette.exceptions import StarletteDeprecationWarning
+
+# Filter deprecated httpx notice from starlette.testclient in starlette 1.7+
+warnings.filterwarnings("ignore", category=StarletteDeprecationWarning)
+
 from starlette.testclient import TestClient
 
 from src.app import create_app

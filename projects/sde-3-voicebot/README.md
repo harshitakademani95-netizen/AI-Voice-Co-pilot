@@ -4,7 +4,7 @@
 **Project Folder:** `projects/sde-3-voicebot/`  
 **Team Branch:** `team/sde-3-voicebot`  
 **Team:** SDE 3  
-**Status:** 100% Integrated & 103 Unit Tests Passing  
+**Status:** 100% Integrated & 412 Unit & Integration Tests Passing  
 **Architecture:** Multi-Workstream Voice Assistant System (End-to-End Team Delivery)
 
 ---
@@ -385,6 +385,186 @@ python -m src.server
 ```
 Then navigate to [http://localhost:8000](http://localhost:8000) (or [http://127.0.0.1:8000](http://127.0.0.1:8000)) in your web browser. The visualizer includes real-time audio waveform canvas rendering, streaming controls, chunk telemetry, and a one-click **Automated Verification Suite** button to trigger test discovery live from the browser.
 
+---
+
+# Workstream W1 – Week 3 Audio & VAD: Complete Implementation (Days 15–21)
+
+**Developer**: Harshita G Kademani  
+**Team**: SDE 3  
+**Workstream**: Audio & VAD Complete Week 3 (Days 15–21)  
+**Duration**: Day 15 – Day 21 (Event Flow, Session Tracking, Device Loss/Reconnection, STT Bridge & Full Team Slice)  
+**Audio & Integration Test Suite**: 412 Passing Unit & Integration Tests (100% Passing)
+
+---
+
+## 1. Overview & Architecture (Days 15–21)
+
+Week 3 delivers the complete event-driven audio ingestion, resilient lifecycle management, speech-to-text bridge, 13-point validation suite, and cross-team backend integration for the AI Voice Copilot:
+
+```
++-------------------------------------------------------------------------------------------------------+
+|                                     WEEK 3 COMPLETE AUDIO PIPELINE                                    |
++-------------------------------------------------------------------------------------------------------+
+|  +------------------+     +------------------------+     +--------------------+     +---------------+ |
+|  | MockAudioDevice  | --> | AudioLifecycleController| --> | BoundedAudioBuffer | --> |    MockVAD    | |
+|  | (Disconnect/Rec) |     | (Capturing/Paused/Err) |     | (Capacity & Drops) |     | (Energy & Prob| |
+|  +------------------+     +------------------------+     +--------------------+     +---------------+ |
+|                                                                                             |         |
+|                                                                                             v         |
+|  +--------------------------------------------------------------------------------------------------+ |
+|  |                                      AudioPipeline Event Flow                                    | |
+|  |  - speech_start       : Onset confirmed with true onset timestamp & segment_id                   | |
+|  |  - audio_chunk        : Normalized PCM frame with session_id, correlation_id, seq_num             | |
+|  |  - speech_end         : Offset confirmed after hangover debounce (total duration, chunks)        | |
+|  |  - device_lost        : Disconnection caught safely -> closes active segment -> ERROR state       | |
+|  |  - device_reconnected : Clean reconnect -> buffer reset -> resumes capture                       | |
+|  |  - cancelled          : Idempotent cancellation -> flushes buffer -> STOPPED state                | |
+|  +--------------------------------------------------------------------------------------------------+ |
+|                                                                                             |         |
+|                                                                                             v         |
+|  +--------------------------------------------------------------------------------------------------+ |
+|  |                      AudioTranscriptionBridge (Downstream STT Integration)                       | |
+|  |  - Ingests normalized audio events                                                               | |
+|  |  - Feeds speech chunks to DeterministicFakeTranscriber / Whisper                                 | |
+|  |  - Accumulates transcript chunks into OrderedSegmentAccumulator                                  | |
+|  |  - Emits finalized TranscriptSegment on speech_end (is_last=True)                                | |
+|  |  - Flushes state safely on cancellation / device loss without crashing                           | |
+|  +--------------------------------------------------------------------------------------------------+ |
+|                                                                                             |         |
+|                                                                                             v         |
+|  +--------------------------------------------------------------------------------------------------+ |
+|  |                    Complete Cross-Team Vertical Slice (Week 3 / Day 21)                          | |
+|  |  Audio Pipeline (W1) -> STT (W2) -> Context & Reasoning (W3) -> Workflow Executor (W4) ->       | |
+|  |  Human-in-the-Loop Safety Gate -> InMemorySessionRepository (W5)                                  | |
++-------------------------------------------------------------------------------------------------------+
+```
+
+---
+
+## 2. Day-by-Day Implementation Summary
+
+| Day | Feature | Core Implementation | Key Test & Verification |
+| :--- | :--- | :--- | :--- |
+| **Day 15** | Speech Start & Speech End Events | `AudioPipeline`, `AudioEvent`, `AudioEventType` (`speech_start`, `speech_end`, `audio_chunk`, `silence`). Multi-segment speech & hangover debounce. | `tests/test_audio_events.py` (11 tests) |
+| **Day 16** | Session ID & Correlation ID | Canonical `AudioEvent` ID validation, pipeline session ledger (`get_events_for_session`, `trace_events`), multi-session isolation. | `tests/test_audio_week3.py` (Tests 1–3) |
+| **Day 17** | Device-Loss Detection & Handling | `MockAudioDevice.disconnect()`, `AudioLifecycleController.handle_device_loss()`, `DEVICE_LOST` event, safe `ERROR` transition, open segment clean finish. | `tests/test_audio_week3.py` (Tests 4–6) |
+| **Day 18** | Device Reconnection & Cancellation | `MockAudioDevice.reconnect()`, `reconnect_device()`, `DEVICE_RECONNECTED`, idempotent `cancel()`, `CANCELLED` event, buffer clear, resource release. | `tests/test_audio_week3.py` (Tests 7–10) |
+| **Day 19** | Transcription Module Integration | `AudioTranscriptionBridge` connecting pipeline to `DeterministicFakeTranscriber` & `OrderedSegmentAccumulator`, error resilience, cancellation flush, defensive copy of metadata. | `tests/test_audio_week3.py` (Tests 11–13, 19) |
+| **Day 20** | 13-Point Standalone Validation | Centralized evaluation engine (`src/audio/validation.py`) with 13 standalone checks verifying event ordering, monotonicity, gaps, late chunks, duplicates, silence, noise, boundaries, IDs, device loss, reconnect, buffer drops. | `python -m src.audio.validation`, `tests/test_audio_week3.py` (Tests 14–18) |
+| **Day 21** | Real Backend Wiring & Team Slice | Real `AudioBackendSessionManager` wiring `AudioPipeline` events to `InMemorySessionRepository`, deriving `WorkflowPlan` from reasoning, HITL approval gate, and FastAPI routes (`/sessions/{id}/audio/*`). | `tests/test_week3_team_integration.py` (3 tests), `tests/test_audio_week3.py` (Tests 20–21) |
+
+---
+
+## 3. Event Specifications (`src/schemas/audio.py`)
+
+### `AudioEventType`
+- `speech_start`: Voice activity onset confirmed.
+- `speech_end`: Voice activity offset confirmed after silence hangover.
+- `audio_chunk`: Normalized audio chunk event carrying PCM payload and timing.
+- `silence`: Ambient silence confirmation.
+- `device_lost`: Physical or mock audio capture device disconnection detected.
+- `device_reconnected`: Audio capture device successfully restored and capture resumed.
+- `cancelled`: Active audio capture session cancelled; resources released and buffers purged.
+
+### `AudioEvent` Contract
+- `event_id`: Unique deterministic/UUID event identifier (e.g. `evt-start-sess1-0`).
+- `event_type`: `AudioEventType` enum.
+- `session_id`: Mandatory session tracking identifier.
+- `correlation_id`: Mandatory distributed tracing identifier.
+- `sequence_number`: Monotonically increasing counter (`>= 0`).
+- `timestamp`: Event emission timestamp in seconds (`>= 0.0`).
+- `chunk`: Optional canonical `AudioChunk` reference.
+- `segment_id`: Speech segment correlation identifier linking `speech_start`, constituent chunks, and `speech_end`.
+- `metadata`: Diagnostic dictionary (`energy`, `speech_probability`, `duration_ms`, `speech_duration_ms`, `total_speech_chunks`, `reason`, etc.).
+
+---
+
+## 4. Integration Status & Contract with Workstream W2 (Speech-to-Text)
+
+Per the team architectural plan, the Audio and VAD pipeline (W1, led by Harshita G Kademani) directly feeds the Speech-to-Text pipeline (W2, led by Disha D K) via the `AudioTranscriptionBridge` (`src/audio/transcription_integration.py`).
+
+### Vendored W2 Snapshot & Contract Alignment
+The subproject vendors the Week 2 STT reference contracts under `src/voice_stt/`, providing the reference accumulator, schemas, and deterministic test adapter (`DeterministicFakeTranscriber`).
+
+| Interface / Class | Method Signature | Return Type | Responsibility |
+| :--- | :--- | :--- | :--- |
+| `OrderedSegmentAccumulator` | `add_event(event: AudioEvent)` | `None` | Ingests normalized audio events and orders them by `sequence_number`. |
+| `OrderedSegmentAccumulator` | `get_ordered_events(segment_id: str)` | `List[AudioEvent]` | Retrieves all accumulated events for a speech segment in strict temporal order. |
+| `OrderedSegmentAccumulator` | `clear_segment(segment_id: str)` | `None` | Cleans up accumulator buffers after segment finalization. |
+| `DeterministicFakeTranscriber` / `BaseSTTAdapter` | `transcribe_chunk(chunk: AudioChunk, is_last: bool = False)` | `Optional[TranscriptSegment]` | Consumes audio chunks, advances state, and returns `TranscriptSegment` upon speech completion. |
+| `DeterministicFakeTranscriber` / `BaseSTTAdapter` | `flush()` | `Optional[TranscriptSegment]` | Flushes any remaining in-flight audio data into a finalized transcript segment. |
+| `STTAdapterState` | Property `state` | `STTAdapterState` | Lifecycle tracking: `UNINITIALIZED`, `READY`, `PROCESSING`, `ERROR`, `CLOSED`. |
+| `TranscriptSegment` | Dataclass / Model | `TranscriptSegment` | Normalized transcript entity with `text`, `start_time`, `end_time`, `is_final`, `confidence`, and `words`. |
+
+### Formal Contract Test Suite (`tests/test_voice_stt_contract.py`)
+All interfaces and schemas between W1 and W2 are strictly validated with 4 dedicated contract tests:
+1. `test_ordered_segment_accumulator_contract`: Validates event ingestion, ordering, and segment clearing.
+2. `test_deterministic_fake_transcriber_contract`: Validates chunk transcription, `is_last=True` finalization, and `flush()` semantics.
+3. `test_stt_adapter_state_lifecycle`: Verifies transitions across `UNINITIALIZED`, `READY`, `PROCESSING`, and `CLOSED`.
+4. `test_transcript_segment_schema`: Verifies structure, required fields, and serialization.
+
+### Workstream W2 Next Steps & Handoff Checklist (Disha D K)
+- [ ] **Whisper Engine Integration**: Replace `DeterministicFakeTranscriber` with the production Whisper streaming model inference engine.
+- [ ] **Multi-Tier Fallback**: Implement automatic fallback (e.g. streaming Whisper -> local base CPU model -> structured error notification).
+- [ ] **Mid-Segment Cancellation**: Subscribe to `AudioEventType.CANCELLED` events to immediately abort GPU transcription kernels and reclaim compute resources.
+
+---
+
+## 5. Verification Evidence & Artifacts
+
+- **Week 3 Demonstration Report**: See [docs/WEEK3_DEMO.md](docs/WEEK3_DEMO.md) for full execution logs and verification matrix across all 9 scenarios.
+- **Raw CLI Demo Log**: [docs/evidence/demo_output.jsonl](docs/evidence/demo_output.jsonl)
+- **Raw Pytest Execution Log**: [docs/evidence/pytest_output.txt](docs/evidence/pytest_output.txt)
+- **Canonical Architecture Note**: All source code, tests, and configurations are maintained exclusively in `projects/sde-3-voicebot/`. Redundant root-level `src/` and `tests/` directories have been decommissioned to ensure single canonical definitions of all schemas and components.
+
+---
+
+## 6. Execution Commands
+
+### Run Complete Week 3 CLI Demonstration (All 7 Days)
+```powershell
+python -m src.cli --week3
+```
+Or via demo runner:
+```powershell
+python -m src.audio.demo --week3
+```
+
+### Run Day 20 Centralized 13-Point Validation Suite
+```powershell
+python -m src.audio.validation
+```
+
+### Run Week 3 Automated Unit & Integration Tests
+```powershell
+# Week 3 specific unit tests (Days 16-20: 21 tests)
+python -m unittest tests/test_audio_week3.py -v
+
+# Week 3 team cross-workstream & safety approval gate integration tests (Day 21: 6 tests)
+python -m unittest tests/test_week3_team_integration.py -v
+
+# Week 3 dedicated audio routes tests (9 tests)
+python -m unittest tests/test_audio_routes.py -v
+
+# Day 15 speech events unit tests (11 tests)
+python -m unittest tests/test_audio_events.py -v
+
+# Week 3 STT contract validation tests (4 tests)
+python -m unittest tests/test_voice_stt_contract.py -v
+```
+
+### Run Entire Project Test Suite (All Workstreams)
+```powershell
+# Full test suite execution via pytest (412 tests, 100% passing, 0 warnings)
+pytest
+
+# Or explicitly from subproject directory
+cd projects/sde-3-voicebot
+python -m pytest tests/ -v
+
+# Subproject test discovery via standard library unittest (234 tests, 100% passing)
+python -m unittest discover tests -p "test_*.py" -v
+```
 ---
 
 ## Unified Execution & Quickstart Guide

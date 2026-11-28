@@ -89,7 +89,7 @@ class OrderedSegmentAccumulator:
         Returns:
             True if event was processed; False if ignored as duplicate.
         """
-        if not isinstance(event, TranscriptEvent):
+        if not isinstance(event, TranscriptEvent) and type(event).__name__ != "TranscriptEvent":
             raise STTValidationError(f"Expected TranscriptEvent, got {type(event).__name__}")
 
         self._events_processed += 1
@@ -127,7 +127,7 @@ class OrderedSegmentAccumulator:
         Returns:
             True if segment was added or updated; False if ignored as duplicate or stale.
         """
-        if not isinstance(segment, TranscriptSegment):
+        if not isinstance(segment, TranscriptSegment) and type(segment).__name__ != "TranscriptSegment":
             raise STTValidationError(f"Expected TranscriptSegment, got {type(segment).__name__}")
 
         if segment.is_final:
@@ -284,6 +284,9 @@ class OrderedSegmentAccumulator:
         self._duplicates_suppressed = 0
         self._out_of_order_count = 0
         self._arrival_history.clear()
+
+    # Convenient alias for pipeline / bridge callers
+    clear = reset
 
     def get_summary(self) -> Dict[str, Any]:
         """Generate structured diagnostic summary of accumulated transcript and telemetry."""

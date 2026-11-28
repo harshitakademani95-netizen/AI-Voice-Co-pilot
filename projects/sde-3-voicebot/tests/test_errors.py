@@ -1,4 +1,9 @@
 """Tests for typed error envelope and sensitive data redaction."""
+import warnings
+
+# Suppress StarletteDeprecationWarning about httpx in TestClient
+warnings.filterwarnings("ignore", message=".*httpx.*")
+
 from starlette.testclient import TestClient
 
 from src.core.security import redact_sensitive_data

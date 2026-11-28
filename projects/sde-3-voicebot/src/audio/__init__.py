@@ -56,6 +56,13 @@ from src.audio.pipeline import (
     generate_silence_fixture,
     generate_speech_fixture,
 )
+from src.schemas.audio import (
+    AudioChunk,
+    AudioError,
+    AudioEvent,
+    AudioEventType,
+    AudioFormat,
+)
 from src.audio.vad import (
     MockVAD,
     VADConfig,
@@ -63,6 +70,14 @@ from src.audio.vad import (
     VADEventType,
     VADInterface,
 )
+
+
+def __getattr__(name: str):
+    """Lazy import for optional downstream integration bridges."""
+    if name == "AudioTranscriptionBridge":
+        from src.audio.transcription_integration import AudioTranscriptionBridge
+        return AudioTranscriptionBridge
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 __all__ = [
     # Week 1
@@ -93,4 +108,8 @@ __all__ = [
     "generate_speech_fixture",
     "generate_silence_fixture",
     "generate_noise_burst_fixture",
+    # Week 3 - Normalized Audio Events (D15-D21)
+    "AudioEvent",
+    "AudioEventType",
+    "AudioTranscriptionBridge",
 ]

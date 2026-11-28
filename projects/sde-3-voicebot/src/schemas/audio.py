@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import binascii
 from dataclasses import dataclass, field
+from enum import Enum
 import math
 from typing import Any, Dict, FrozenSet, Optional
 
@@ -580,4 +581,237 @@ class AudioChunk:
             data=data_bytes,
             format=format_obj,
             metadata=raw_meta,
+        )
+
+
+class AudioEventType(str, Enum):
+    """
+    Classification for normalized events in the audio capture and processing pipeline (Week 3, D15-D21).
+
+    Values:
+        SPEECH_START: Emitted when VAD detects the confirmed onset of speech.
+        SPEECH_END: Emitted when VAD detects the confirmed end of a speech segment after silence debounce.
+        AUDIO_CHUNK: Normalized audio frame slice processed through the pipeline.
+        SILENCE: Emitted when ambient silence is confirmed.
+        DEVICE_LOST: Emitted when audio capture hardware unexpectedly disconnects or fails.
+        DEVICE_RECONNECTED: Emitted when audio hardware connection is successfully re-established.
+        CANCELLED: Emitted when the audio capture session is explicitly cancelled by user or orchestrator.
+    """
+
+    SPEECH_START = "speech_start"
+    SPEECH_END = "speech_end"
+    AUDIO_CHUNK = "audio_chunk"
+    SILENCE = "silence"
+    DEVICE_LOST = "device_lost"
+    DEVICE_RECONNECTED = "device_reconnected"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True)
+class AudioEvent:
+    """
+    Normalized audio event contract for downstream processing and event bus telemetry (Week 3, D15).
+
+    Carries session correlation, monotonic event ordering, timing, chunk payload,
+    speech segment association, and VAD metadata.
+
+    Attributes:
+        event_id (str): Unique event identifier (e.g., 'evt-start-sess1-0', 'evt-chunk-sess1-1').
+        event_type (AudioEventType): Event classification.
+        session_id (str): Identifier associating event with the active user session.
+        correlation_id (str): Distributed tracing/request correlation identifier.
+        sequence_number (int): Monotonically non-decreasing event counter within the stream (>= 0).
+        timestamp (float): Event emission timestamp in seconds (audio stream time, finite, >= 0.0).
+        chunk (Optional[AudioChunk]): Associated canonical AudioChunk instance (if applicable).
+        segment_id (Optional[str]): Speech segment identifier linking SPEECH_START, internal
+            speech chunks, and corresponding SPEECH_END.
+        metadata (Dict[str, Any]): Contextual metadata (VAD energy, probabilities, durations, etc.).
+    """
+
+    event_id: str
+    event_type: AudioEventType
+    session_id: str
+    correlation_id: str
+    sequence_number: int
+    timestamp: float
+    chunk: Optional[AudioChunk] = None
+    segment_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Validate normalized event attributes and enforce contract invariants."""
+        # 0. Coerce event_type string to AudioEventType enum if needed
+        if isinstance(self.event_type, str) and not isinstance(self.event_type, AudioEventType):
+            try:
+                object.__setattr__(self, "event_type", AudioEventType(self.event_type.lower()))
+            except ValueError:
+                valid_types = [e.value for e in AudioEventType]
+                raise AudioError(
+                    message=f"Invalid event_type: {self.event_type!r}. Must be one of {valid_types}.",
+                    code="INVALID_PARAMETER",
+                    details={"event_type": self.event_type, "valid_types": valid_types},
+                )
+
+        if not isinstance(self.event_type, AudioEventType):
+            raise AudioError(
+                message=f"event_type must be an AudioEventType (received: {type(self.event_type).__name__}).",
+                code="INVALID_PARAMETER",
+                details={"event_type": str(self.event_type)},
+            )
+
+        # 1. Validate event_id
+        if not isinstance(self.event_id, str) or not self.event_id.strip():
+            raise AudioError(
+                message="event_id must be a non-empty string.",
+                code="INVALID_PARAMETER",
+                details={"event_id": self.event_id},
+            )
+
+        # 2. Validate session_id
+        if not isinstance(self.session_id, str) or not self.session_id.strip():
+            raise AudioError(
+                message="session_id must be a non-empty string.",
+                code="INVALID_PARAMETER",
+                details={"session_id": self.session_id},
+            )
+
+        # 3. Validate correlation_id
+        if not isinstance(self.correlation_id, str) or not self.correlation_id.strip():
+            raise AudioError(
+                message="correlation_id must be a non-empty string.",
+                code="INVALID_PARAMETER",
+                details={"correlation_id": self.correlation_id},
+            )
+
+        # 4. Validate sequence_number
+        if not isinstance(self.sequence_number, int) or isinstance(self.sequence_number, bool):
+            raise AudioError(
+                message=f"sequence_number must be an integer (received: {type(self.sequence_number).__name__}).",
+                code="INVALID_SEQUENCE_ID",
+                details={"sequence_number": self.sequence_number},
+            )
+        if self.sequence_number < 0:
+            raise AudioError(
+                message=f"sequence_number must be non-negative (received: {self.sequence_number}).",
+                code="INVALID_SEQUENCE_ID",
+                details={"sequence_number": self.sequence_number},
+            )
+
+        # 5. Validate timestamp
+        if not isinstance(self.timestamp, (int, float)) or isinstance(self.timestamp, bool):
+            raise AudioError(
+                message=f"timestamp must be a float or integer (received: {type(self.timestamp).__name__}).",
+                code="INVALID_TIMESTAMP",
+                details={"timestamp": self.timestamp},
+            )
+        if not math.isfinite(self.timestamp):
+            raise AudioError(
+                message=f"timestamp must be a finite number (received: {self.timestamp}).",
+                code="INVALID_TIMESTAMP",
+                details={"timestamp": self.timestamp},
+            )
+        if self.timestamp < 0:
+            raise AudioError(
+                message=f"timestamp must be non-negative (received: {self.timestamp} s).",
+                code="INVALID_TIMESTAMP",
+                details={"timestamp": self.timestamp},
+            )
+
+        # 6. Validate chunk
+        if self.chunk is not None and not isinstance(self.chunk, AudioChunk):
+            raise AudioError(
+                message=f"chunk must be an AudioChunk instance or None (received: {type(self.chunk).__name__}).",
+                code="INVALID_CHUNK_DATA",
+                details={"chunk_type": type(self.chunk).__name__},
+            )
+
+        # 7. Validate segment_id
+        if self.segment_id is not None:
+            if not isinstance(self.segment_id, str) or not self.segment_id.strip():
+                raise AudioError(
+                    message="segment_id must be a non-empty string or None.",
+                    code="INVALID_PARAMETER",
+                    details={"segment_id": self.segment_id},
+                )
+
+        # 8. Defensive copy metadata
+        if isinstance(self.metadata, dict):
+            object.__setattr__(self, "metadata", dict(self.metadata))
+        else:
+            raise AudioError(
+                message=f"metadata must be a dictionary (received: {type(self.metadata).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"metadata_type": type(self.metadata).__name__},
+            )
+
+    @property
+    def is_speech(self) -> bool:
+        """True if this event represents speech onset, speech end, or a speech-bearing chunk."""
+        if self.event_type in (AudioEventType.SPEECH_START, AudioEventType.SPEECH_END):
+            return True
+        return bool(self.metadata.get("is_speech", False))
+
+    @property
+    def duration_ms(self) -> float:
+        """Duration represented by this event in milliseconds."""
+        if self.chunk is not None:
+            return self.chunk.duration_ms
+        return float(self.metadata.get("duration_ms", 0.0))
+
+    def to_dict(self, include_base64_data: bool = True) -> Dict[str, Any]:
+        """Serialize AudioEvent to standard dictionary representation."""
+        res: Dict[str, Any] = {
+            "event_id": self.event_id,
+            "event_type": self.event_type.value,
+            "session_id": self.session_id,
+            "correlation_id": self.correlation_id,
+            "sequence_number": self.sequence_number,
+            "timestamp": round(float(self.timestamp), 6),
+            "segment_id": self.segment_id,
+            "metadata": dict(self.metadata),
+        }
+        if self.chunk is not None:
+            res["chunk"] = self.chunk.to_dict(include_base64_data=include_base64_data)
+        else:
+            res["chunk"] = None
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> AudioEvent:
+        """Construct an AudioEvent from a serialized dictionary."""
+        if not isinstance(data, dict):
+            raise AudioError(
+                message=f"Event payload must be a dictionary (received: {type(data).__name__}).",
+                code="INVALID_PAYLOAD",
+                details={"data_type": type(data).__name__},
+            )
+        for req in ("event_id", "event_type", "session_id", "correlation_id", "sequence_number", "timestamp"):
+            if req not in data:
+                raise AudioError(
+                    message=f"Missing required field '{req}' in event dictionary payload.",
+                    code="INVALID_PAYLOAD",
+                    details={"missing_key": req, "keys_provided": list(data.keys())},
+                )
+        raw_chunk = data.get("chunk")
+        chunk_obj: Optional[AudioChunk] = None
+        if raw_chunk is not None:
+            if isinstance(raw_chunk, AudioChunk):
+                chunk_obj = raw_chunk
+            elif isinstance(raw_chunk, dict):
+                chunk_obj = AudioChunk.from_dict(raw_chunk)
+            else:
+                raise AudioError(
+                    message=f"Invalid chunk in event payload (received: {type(raw_chunk).__name__}).",
+                    code="INVALID_CHUNK_DATA",
+                )
+        return cls(
+            event_id=data["event_id"],
+            event_type=data["event_type"],
+            session_id=data["session_id"],
+            correlation_id=data["correlation_id"],
+            sequence_number=data["sequence_number"],
+            timestamp=data["timestamp"],
+            chunk=chunk_obj,
+            segment_id=data.get("segment_id"),
+            metadata=data.get("metadata", {}),
         )

@@ -206,6 +206,20 @@ class InMemorySessionRepository:
             session.updated_at = now_iso
             return event.model_copy(deep=True)
 
+    def update_metadata(
+        self,
+        session_id: str,
+        metadata: Dict[str, Any],
+    ) -> Session:
+        """Updates metadata dictionary for an existing session."""
+        with self._lock:
+            if session_id not in self._sessions:
+                raise SessionNotFoundError(session_id)
+            self._sessions[session_id].metadata.update(metadata)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            self._sessions[session_id].updated_at = now_iso
+            return self._sessions[session_id].model_copy(deep=True)
+
     def delete(self, session_id: str) -> bool:
         """Removes a session by ID."""
         with self._lock:

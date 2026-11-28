@@ -12,13 +12,22 @@ This module defines the canonical named demonstration and diagnostic fixtures:
 from __future__ import annotations
 
 from typing import Any, Dict, List, NamedTuple, Optional
-from voice_stt.schemas import (
-    STTErrorDetail,
-    TranscriptEvent,
-    TranscriptEventType,
-    TranscriptSegment,
-    WordTiming,
-)
+try:
+    from .schemas import (
+        STTErrorDetail,
+        TranscriptEvent,
+        TranscriptEventType,
+        TranscriptSegment,
+        WordTiming,
+    )
+except ImportError:
+    from voice_stt.schemas import (
+        STTErrorDetail,
+        TranscriptEvent,
+        TranscriptEventType,
+        TranscriptSegment,
+        WordTiming,
+    )
 
 
 class STTFixture(NamedTuple):

@@ -32,12 +32,20 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from voice_stt.schemas import (
-    AudioChunk,
-    AudioFormat,
-    STTErrorDetail,
-    TranscriptEvent,
-)
+try:
+    from .schemas import (
+        AudioChunk,
+        AudioFormat,
+        STTErrorDetail,
+        TranscriptEvent,
+    )
+except ImportError:
+    from voice_stt.schemas import (
+        AudioChunk,
+        AudioFormat,
+        STTErrorDetail,
+        TranscriptEvent,
+    )
 
 
 class STTAdapterState(str, Enum):

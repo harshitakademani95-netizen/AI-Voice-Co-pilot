@@ -201,6 +201,19 @@ class AudioDeviceInterface(abc.ABC):
         """
         raise NotImplementedError
 
+    @property
+    def is_connected(self) -> bool:
+        """True if the device is currently physically and logically connected."""
+        return True
+
+    def disconnect(self, reason: str = "Device disconnected.") -> None:
+        """Simulate hardware disconnection or loss (Week 3, D17)."""
+        pass
+
+    def reconnect(self, device_id: Optional[str] = None) -> bool:
+        """Attempt to restore device connection (Week 3, D18)."""
+        return True
+
 
 class MockAudioDevice(AudioDeviceInterface):
     """
@@ -250,6 +263,7 @@ class MockAudioDevice(AudioDeviceInterface):
         total_duration_sec: Optional[float] = 1.0,
         simulate_init_failure: bool = False,
         simulate_disconnect_after_chunks: Optional[int] = None,
+        simulate_reconnect_failure: bool = False,
     ) -> None:
         """
         Initialize MockAudioDevice.
@@ -266,6 +280,7 @@ class MockAudioDevice(AudioDeviceInterface):
             total_duration_sec: Bounded stream duration limit.
             simulate_init_failure: If True, open() will fail with DEVICE_INIT_FAILURE.
             simulate_disconnect_after_chunks: If set, raises DEVICE_UNAVAILABLE after N chunks.
+            simulate_reconnect_failure: If True, reconnect() attempts return False.
         """
         self._devices: List[AudioDeviceInfo] = (
             list(devices) if devices is not None else list(self.DEFAULT_DEVICES)
@@ -282,6 +297,9 @@ class MockAudioDevice(AudioDeviceInterface):
 
         self._simulate_init_failure: bool = simulate_init_failure
         self._simulate_disconnect_after_chunks: Optional[int] = simulate_disconnect_after_chunks
+        self._simulate_reconnect_failure: bool = simulate_reconnect_failure
+        self._is_disconnected: bool = False
+        self._disconnect_reason: Optional[str] = None
         self._chunks_emitted: int = 0
 
         self._is_open: bool = False
@@ -400,6 +418,11 @@ class MockAudioDevice(AudioDeviceInterface):
         """Manual control for testing explicit permission changes."""
         self._permission_state = state
 
+    def revoke_permission(self) -> None:
+        """Explicitly revoke audio capture permission and close device (Week 3, B11)."""
+        self._permission_state = AudioPermissionState.DENIED
+        self.close()
+
     # -------------------------------------------------------------------------
     # Lifecycle: Open, Close, and Streaming
     # -------------------------------------------------------------------------
@@ -408,6 +431,36 @@ class MockAudioDevice(AudioDeviceInterface):
     def is_open(self) -> bool:
         """True if the mock device is open and active."""
         return self._is_open
+
+    @property
+    def is_connected(self) -> bool:
+        """True if the mock device is currently connected."""
+        return not self._is_disconnected
+
+    def disconnect(self, reason: str = "Audio input device was unexpectedly disconnected or became unavailable.") -> None:
+        """
+        Simulate immediate hardware disconnection or loss (Week 3, D17).
+        Closes active hardware handles while tracking disconnection state.
+        """
+        self._is_disconnected = True
+        self._disconnect_reason = reason
+        self.close()
+
+    def reconnect(self, device_id: Optional[str] = None) -> bool:
+        """
+        Restore connection after device loss or simulate reconnection failure (Week 3, D18).
+        """
+        if self._simulate_reconnect_failure:
+            return False
+
+        if device_id is not None:
+            self.select_device(device_id)
+
+        self._is_disconnected = False
+        self._disconnect_reason = None
+        self._chunks_emitted = 0
+        self._simulate_disconnect_after_chunks = None
+        return True
 
     @property
     def selected_device(self) -> Optional[AudioDeviceInfo]:
@@ -424,6 +477,14 @@ class MockAudioDevice(AudioDeviceInterface):
         """
         if self._is_open:
             return  # Already open (idempotent)
+
+        if self._is_disconnected:
+            self._is_open = False
+            raise AudioError(
+                message=f"Cannot open audio device: Device is disconnected ({self._disconnect_reason or 'DEVICE_UNAVAILABLE'}).",
+                code="DEVICE_UNAVAILABLE",
+                details={"reason": self._disconnect_reason},
+            )
 
         if self._selected_device is None:
             self._is_open = False
@@ -527,6 +588,14 @@ class MockAudioDevice(AudioDeviceInterface):
         Raises:
             AudioError: If device is not open (DEVICE_NOT_OPEN) or disconnects (DEVICE_UNAVAILABLE).
         """
+        if self._is_disconnected:
+            self.close()
+            raise AudioError(
+                message=self._disconnect_reason or "Audio input device was unexpectedly disconnected or became unavailable.",
+                code="DEVICE_UNAVAILABLE",
+                details={"reason": "device_disconnected"},
+            )
+
         if not self._is_open or self._mock_mic is None:
             raise AudioError(
                 message="Cannot read audio chunk: device is not open. Call open() first.",

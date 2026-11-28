@@ -278,6 +278,61 @@ class AudioLifecycleController:
         finally:
             self._transition(AudioLifecycleState.STOPPED)
 
+    def handle_device_loss(self, error: Optional[AudioError] = None) -> None:
+        """
+        Handle unexpected audio device loss safely without throwing unhandled exceptions (Week 3, D17).
+        Transitions controller from RUNNING or PAUSED to ERROR and releases hardware handles.
+        Safe to call if already in ERROR or STOPPED state.
+        """
+        if self._state in (AudioLifecycleState.STOPPED, AudioLifecycleState.ERROR):
+            if error is not None:
+                self._last_error = error
+            return
+
+        self._transition(AudioLifecycleState.ERROR)
+        self._last_error = error or AudioError(
+            message="Audio input device was lost or disconnected.",
+            code="DEVICE_UNAVAILABLE",
+        )
+        try:
+            self._device.close()
+        except Exception:
+            pass
+
+    def handle_device_reconnected(self, resume_capture: bool = True) -> bool:
+        """
+        Restore controller operation following device reconnection (Week 3, D18).
+        """
+        if not self._device.is_connected:
+            return False
+        if resume_capture and self._state in (AudioLifecycleState.ERROR, AudioLifecycleState.STOPPED):
+            try:
+                self.start()
+                return True
+            except Exception as exc:
+                self._last_error = exc if isinstance(exc, AudioError) else AudioError(str(exc))
+                return False
+        elif resume_capture and self._state == AudioLifecycleState.PAUSED:
+            try:
+                self.resume()
+                return True
+            except Exception as exc:
+                self._last_error = exc if isinstance(exc, AudioError) else AudioError(str(exc))
+                return False
+        elif not resume_capture:
+            # Leave controller in a valid stopped/idle state when capture is not resumed
+            if self._state == AudioLifecycleState.ERROR:
+                self._transition(AudioLifecycleState.STOPPED)
+            return True
+        return True
+
+    def cancel(self, reason: str = "capture_cancelled") -> None:
+        """
+        Cancel active audio capture immediately and release all resources (Week 3, D18).
+        Safe and idempotent.
+        """
+        self.stop()
+
     def read_chunk(self) -> Optional[AudioChunk]:
         """
         Read the next AudioChunk from the device if in RUNNING state.
