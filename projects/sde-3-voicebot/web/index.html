@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Voice Co-Pilot | Context & Reasoning Layer (W3)</title>
+  <meta name="description" content="Localhost interactive dashboard and reasoning engine for AI Voice Co-Pilot Workstream W3.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-orb">
+          <div class="orb-core"></div>
+          <div class="orb-ring"></div>
+        </div>
+        <div class="brand-text">
+          <h1>AI Voice Co-Pilot</h1>
+          <span class="badge-tag">Workstream W3 • Context & Reasoning Layer</span>
+        </div>
+      </div>
+
+      <div class="header-badges">
+        <div class="status-pill status-safe">
+          <span class="status-dot"></span>
+          <span>Screen Capture: <strong>Disabled by Default</strong></span>
+        </div>
+        <div class="status-pill status-mock">
+          <span class="status-dot green"></span>
+          <span>Mock Reasoning: <strong>Deterministic (Offline)</strong></span>
+        </div>
+        <button id="btn-run-tests" class="btn btn-secondary btn-sm" title="Run automated unit test suite (54 tests)" aria-label="Run automated unit test suite (54 tests)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          Run Tests (54/54)
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-layout">
+      <!-- Left Column: Scenario & Query Input -->
+      <section class="panel left-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <h2>Context & Query Dispatcher</h2>
+          </div>
+          <div class="version-selector">
+            <label for="prompt-version-select">Prompt Version:</label>
+            <select id="prompt-version-select" class="select-input">
+              <option value="v1.0.0" selected>v1.0.0 (Baseline)</option>
+              <option value="v1.1.0">v1.1.0 (Strict Citations)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Preset Scenarios -->
+        <div class="preset-section">
+          <label class="section-label" id="scenarios-label">Demonstration Scenarios (PRD Core Use Cases)</label>
+          <div class="scenario-grid" role="group" aria-labelledby="scenarios-label">
+            <button type="button" class="scenario-card active" data-scenario="error" aria-pressed="true">
+              <div class="scenario-icon red" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div class="scenario-meta">
+                <strong>PRD UC-02: Error Diagnosis</strong>
+                <span>ZeroDivisionError in math module</span>
+              </div>
+            </button>
+
+            <button type="button" class="scenario-card" data-scenario="document" aria-pressed="false">
+              <div class="scenario-icon blue" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </div>
+              <div class="scenario-meta">
+                <strong>PRD UC-03: Document Explain</strong>
+                <span>Nimbus Paper Abstract & Indexing</span>
+              </div>
+            </button>
+
+            <button type="button" class="scenario-card" data-scenario="file_action" aria-pressed="false">
+              <div class="scenario-icon amber" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+              </div>
+              <div class="scenario-meta">
+                <strong>PRD UC-08: File Action (Gate)</strong>
+                <span>Move Files (Category C Safety Gate)</span>
+              </div>
+            </button>
+
+            <button type="button" class="scenario-card" data-scenario="prompt_injection" aria-pressed="false">
+              <div class="scenario-icon purple" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div class="scenario-meta">
+                <strong>Security: Injection Defense</strong>
+                <span>Untrusted Context XML Isolation</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Voice / Query Input Box -->
+        <div class="query-section">
+          <div class="query-header-row">
+            <label for="user-query-input" class="section-label">User Spoken or Typed Query</label>
+            <span class="keyboard-hint" title="Keyboard Shortcut">Ctrl+Enter to send</span>
+          </div>
+          <div class="input-wrapper">
+            <textarea id="user-query-input" rows="3" class="text-area-input" placeholder="Enter query..." aria-label="User query input">Why is this application failing?</textarea>
+            <div class="input-actions">
+              <button type="button" id="btn-mic-simulate" class="btn-mic" title="Simulate Voice Input" aria-label="Simulate Voice Input">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                <span>Voice Pulse</span>
+              </button>
+              <button type="button" id="btn-dispatch" class="btn btn-primary" aria-label="Execute Reasoning">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Execute Reasoning
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Context Items Inspector -->
+        <div class="context-inspector">
+          <div class="section-header">
+            <label class="section-label">Ingested Context Items (Untrusted Data)</label>
+            <span id="context-count-badge" class="count-badge">3 Items</span>
+          </div>
+          <div id="context-items-list" class="context-list"></div>
+        </div>
+      </section>
+
+      <!-- Right Column: Reasoning Output & Grounding -->
+      <section class="panel right-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <h2>Reasoning Layer Output</h2>
+          </div>
+          <div class="output-status-meta">
+            <span id="latency-indicator" class="meta-pill">Latency: <strong>-- ms</strong></span>
+            <span id="confidence-indicator" class="meta-pill">Conf: <strong>--%</strong></span>
+          </div>
+        </div>
+
+        <!-- Safety Banner / Approval Gate Alert -->
+        <div id="approval-gate-banner" class="approval-gate hidden" role="alert" aria-live="assertive">
+          <div class="gate-icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="gate-content">
+            <div class="gate-title">Human-in-the-Loop Safety Gate Triggered</div>
+            <p id="gate-message">This action involves sensitive workspace changes. User confirmation is required before execution.</p>
+            <div class="gate-actions">
+              <button type="button" id="btn-approve-action" class="btn btn-success btn-sm">Approve Action</button>
+              <button type="button" id="btn-reject-action" class="btn btn-danger btn-sm">Reject Action</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Synthesized Voicebot Response -->
+        <div class="response-card" aria-live="polite">
+          <div class="response-card-header">
+            <div class="ai-avatar">
+              <span class="ai-pulse" aria-hidden="true"></span>
+              <span>AI Response</span>
+            </div>
+            <div id="risk-category-badge" class="risk-badge risk-a">
+              Category A • Informational
+            </div>
+          </div>
+          <div id="response-text-body" class="response-body">
+            Select a scenario on the left or type a query, then click <strong>"Execute Reasoning"</strong> to test the deterministic reasoning engine.
+          </div>
+        </div>
+
+        <!-- Grounded Source References -->
+        <div class="citations-section">
+          <div class="section-header">
+            <label class="section-label">Grounded Source References (Verifiable Citations)</label>
+            <span id="citations-count-badge" class="count-badge">0 Cited</span>
+          </div>
+          <div id="citations-list" class="citations-grid">
+            <div class="empty-state">No sources cited yet.</div>
+          </div>
+        </div>
+
+        <!-- Prompt Boundary Inspector -->
+        <div class="prompt-inspector-card">
+          <div class="inspector-header">
+            <button type="button" id="toggle-prompt-inspector" class="btn-toggle" aria-expanded="false" aria-controls="prompt-preview-container">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+              <span>Inspect Rendered Prompt (Trusted Instructions vs Untrusted Context)</span>
+            </button>
+            <span class="badge-tag">Security & Isolation</span>
+          </div>
+          <div id="prompt-preview-container" class="prompt-preview-container collapsed">
+            <pre><code id="raw-prompt-preview">Click to expand and inspect prompt boundary isolation...</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Unit Test Modal -->
+    <div id="test-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title-heading">
+      <div class="modal-box">
+        <div class="modal-header">
+          <div class="modal-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            <h3 id="modal-title-heading">Automated Test Suite Runner</h3>
+          </div>
+          <button type="button" id="btn-close-modal" class="btn-close" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="test-stats-row">
+            <div class="test-stat-card">
+              <span class="stat-number" id="test-total-count">54</span>
+              <span class="stat-label">Total Tests</span>
+            </div>
+            <div class="test-stat-card success">
+              <span class="stat-number" id="test-pass-count">54</span>
+              <span class="stat-label">Passed</span>
+            </div>
+            <div class="test-stat-card danger">
+              <span class="stat-number" id="test-fail-count">0</span>
+              <span class="stat-label">Failures</span>
+            </div>
+            <div class="test-stat-card info">
+              <span class="stat-number" id="test-duration">0.013s</span>
+              <span class="stat-label">Duration</span>
+            </div>
+          </div>
+          <div class="test-log-terminal">
+            <pre><code id="test-log-output">Running tests...</code></pre>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-rerun-tests" class="btn btn-primary btn-sm">Re-run Tests</button>
+          <button type="button" id="btn-close-modal-2" class="btn btn-secondary btn-sm">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Announcer for Screen Readers -->
+    <div id="a11y-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>AI Voice Co-Pilot • Team SDE 3 • Workstream W3 (Context & Reasoning)</span>
+      <span class="footer-links">
+        <a href="http://localhost:8000" target="_blank">http://localhost:8000</a>
+      </span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
