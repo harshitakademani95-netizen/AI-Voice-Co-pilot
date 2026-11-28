@@ -49,9 +49,11 @@ class STTValidationError(ValueError):
 class TranscriptEventType(str, Enum):
     """Enumeration of speech-to-text stream event lifecycle types.
 
-    Active lifecycle events emitted by the mock pipeline:
+    Active lifecycle events emitted by the pipeline:
     - INTERIM: Tentative partial hypothesis in flight.
+    - REVISION: Explicit update to an active in-flight interim hypothesis.
     - FINAL: Committed, immutable segment of finalized speech.
+    - FINALIZATION: Explicit finalization event committing a speech segment.
     - ERROR: Pipeline or transcriber failure payload.
     - STREAM_COMPLETED: Stream termination delimiter emitted after last chunk.
 
@@ -61,7 +63,9 @@ class TranscriptEventType(str, Enum):
     """
 
     INTERIM = "interim"
+    REVISION = "revision"
     FINAL = "final"
+    FINALIZATION = "finalization"
     ERROR = "error"
     SPEECH_STARTED = "speech_started"
     SPEECH_ENDED = "speech_ended"
@@ -335,13 +339,14 @@ class TranscriptEvent(BaseModel):
         ge=0.0,
         description="Event emission timestamp in seconds (finite, >= 0.0). Real adapters emit wall-clock POSIX time; the deterministic fake uses a simulated clock (seconds since stream start) so runs are reproducible.",
     )
-    session_id: Optional[str] = Field(
-        default=None,
-        description="Optional correlation identifier linking event to an active user session.",
+    session_id: str = Field(
+        default="default-session",
+        min_length=1,
+        description="Correlation identifier linking event to an active user session.",
     )
     segment: Optional[TranscriptSegment] = Field(
         default=None,
-        description="Transcribed segment payload (mandatory for interim and final events).",
+        description="Transcribed segment payload (mandatory for interim, revision, final, and finalization events).",
     )
     error: Optional[STTErrorDetail] = Field(
         default=None,
@@ -352,6 +357,18 @@ class TranscriptEvent(BaseModel):
         description="Provider-neutral diagnostic or telemetry attributes.",
     )
 
+    @field_validator("session_id", mode="before")
+    @classmethod
+    def validate_session_id(cls, v: Any) -> str:
+        if v is None:
+            return "default-session"
+        if not isinstance(v, str):
+            raise STTValidationError(f"Session identifier must be a string, got {type(v).__name__}.", field_name="session_id")
+        trimmed = v.strip()
+        if not trimmed:
+            raise STTValidationError("Session identifier cannot be empty or whitespace.", field_name="session_id")
+        return trimmed
+
     @field_validator("timestamp")
     @classmethod
     def validate_finite_timestamp(cls, v: float) -> float:
@@ -361,22 +378,27 @@ class TranscriptEvent(BaseModel):
 
     @model_validator(mode="after")
     def validate_event_consistency(self) -> TranscriptEvent:
-        # Check interim / final requires segment
-        if self.event_type in (TranscriptEventType.INTERIM, TranscriptEventType.FINAL):
+        # Check interim / revision / final / finalization requires segment
+        if self.event_type in (
+            TranscriptEventType.INTERIM,
+            TranscriptEventType.REVISION,
+            TranscriptEventType.FINAL,
+            TranscriptEventType.FINALIZATION,
+        ):
             if self.segment is None:
                 raise STTValidationError(
                     f"Events of type '{self.event_type.value}' require a non-null 'segment' payload.",
                     field_name="segment",
                 )
             # Consistency between event_type and segment.is_final
-            if self.event_type == TranscriptEventType.FINAL and not self.segment.is_final:
+            if self.event_type in (TranscriptEventType.FINAL, TranscriptEventType.FINALIZATION) and not self.segment.is_final:
                 raise STTValidationError(
-                    "TranscriptEvent is marked 'final' but its segment.is_final is False.",
+                    f"TranscriptEvent is marked '{self.event_type.value}' but its segment.is_final is False.",
                     field_name="segment.is_final",
                 )
-            if self.event_type == TranscriptEventType.INTERIM and self.segment.is_final:
+            if self.event_type in (TranscriptEventType.INTERIM, TranscriptEventType.REVISION) and self.segment.is_final:
                 raise STTValidationError(
-                    "TranscriptEvent is marked 'interim' but its segment.is_final is True.",
+                    f"TranscriptEvent is marked '{self.event_type.value}' but its segment.is_final is True.",
                     field_name="segment.is_final",
                 )
 

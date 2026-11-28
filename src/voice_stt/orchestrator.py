@@ -11,6 +11,7 @@ duplicate suppression, and out-of-order event handling.
 from __future__ import annotations
 
 import concurrent.futures
+import math
 import re
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional
@@ -123,6 +124,26 @@ def normalize_stt_error(
             details={"error_type": type(exc).__name__},
         )
 
+    if isinstance(exc, OrchestratorClosedError):
+        raw_msg = sanitize_error_message(getattr(exc, "message", str(exc)))
+        return STTErrorDetail(
+            code="ADAPTER_CLOSED",
+            message=raw_msg,
+            request_id=request_id,
+            retryable=False,
+            details={"error_type": type(exc).__name__},
+        )
+
+    if isinstance(exc, OrchestratorCancelledError):
+        raw_msg = sanitize_error_message(getattr(exc, "message", str(exc)))
+        return STTErrorDetail(
+            code="OPERATION_CANCELLED",
+            message=raw_msg,
+            request_id=request_id,
+            retryable=False,
+            details={"error_type": type(exc).__name__},
+        )
+
     # Generic or unexpected exceptions
     raw_msg = sanitize_error_message(str(exc) or "An unexpected transcription error occurred.")
     lower_msg = raw_msg.lower()
@@ -130,12 +151,18 @@ def normalize_stt_error(
     if "timeout" in lower_msg:
         code = "TRANSCRIPTION_TIMEOUT"
         retryable = True
+    elif "quota" in lower_msg:
+        code = "QUOTA_EXCEEDED"
+        retryable = False
     elif "rate limit" in lower_msg or "429" in lower_msg:
         code = "RATE_LIMITED"
         retryable = True
     elif "503" in lower_msg or "unavailable" in lower_msg or "connection" in lower_msg:
         code = "SERVICE_UNAVAILABLE"
         retryable = True
+    elif "cancelled" in lower_msg or "canceled" in lower_msg:
+        code = "OPERATION_CANCELLED"
+        retryable = False
     elif "unauthorized" in lower_msg or "unauthenticated" in lower_msg or "forbidden" in lower_msg or "401" in lower_msg:
         code = "UNAUTHENTICATED"
         retryable = False
@@ -165,6 +192,74 @@ class OrchestratorClosedError(RuntimeError):
         super().__init__(message)
         self.code = "ADAPTER_CLOSED"
         self.retryable = False
+
+
+class OrchestratorCancelledError(RuntimeError):
+    """Raised or emitted when transcription is attempted on a cancelled orchestrator."""
+
+    def __init__(
+        self,
+        message: str = "Transcription operation was cancelled.",
+    ) -> None:
+        super().__init__(message)
+        self.code = "OPERATION_CANCELLED"
+        self.retryable = False
+
+
+def is_supported_fallback_error(exc: Exception, error_detail: Optional[STTErrorDetail] = None) -> bool:
+    """Determine whether an error qualifies for automatic mock provider fallback.
+
+    Supported provider failure scenarios:
+    1. API quota exceeded (e.g. QUOTA_EXCEEDED, RATE_LIMITED, 429, insufficient quota).
+    2. Network connection failure (e.g. ConnectionError, connection reset/refused).
+    3. Provider unavailable or temporary service failure (e.g. SERVICE_UNAVAILABLE, 503, timeout).
+
+    Explicitly excluded from fallback (never masked):
+    - Validation errors (STTValidationError, VALIDATION_ERROR, INVALID_PAYLOAD).
+    - Programming errors (ValueError, TypeError, KeyError, AttributeError, NameError, AssertionError).
+    - Operational lifecycle states (OrchestratorClosedError, OrchestratorCancelledError).
+    """
+    if isinstance(
+        exc,
+        (
+            STTValidationError,
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            NameError,
+            AssertionError,
+            OrchestratorClosedError,
+            OrchestratorCancelledError,
+        ),
+    ):
+        return False
+
+    code = error_detail.code.upper() if error_detail else ""
+    msg = (error_detail.message if error_detail else str(exc)).lower()
+
+    if code in ("VALIDATION_ERROR", "INVALID_PAYLOAD", "ADAPTER_CLOSED", "OPERATION_CANCELLED"):
+        return False
+
+    # 1. API Quota exceeded / rate limited
+    if code in ("QUOTA_EXCEEDED", "RATE_LIMITED", "RESOURCE_EXHAUSTED"):
+        return True
+    if "quota" in msg or "429" in msg or "rate limit" in msg:
+        return True
+
+    # 2. Network connection failure
+    if isinstance(exc, (ConnectionError, ConnectionResetError, ConnectionRefusedError)):
+        return True
+    if "connection" in msg or "network" in msg:
+        return True
+
+    # 3. Provider unavailable / temporary service failure / timeout
+    if code in ("SERVICE_UNAVAILABLE", "TRANSCRIPTION_TIMEOUT"):
+        return True
+    if "503" in msg or "unavailable" in msg or "timeout" in msg:
+        return True
+
+    return False
 
 
 class RetryConfig(BaseModel):
@@ -224,6 +319,9 @@ class TranscriptionOrchestrator:
         session_id: Optional[str] = None,
         retry_config: Optional[RetryConfig] = None,
         preprocessor: Optional[AudioPreprocessor] = None,
+        min_confidence_threshold: Optional[float] = None,
+        enable_fallback: bool = False,
+        fallback_adapter: Optional[BaseSTTAdapter] = None,
     ) -> None:
         """Initialize the transcription orchestrator.
 
@@ -233,12 +331,57 @@ class TranscriptionOrchestrator:
             session_id: Optional identifier for the streaming session.
             retry_config: Optional RetryConfig for bounded retries and timeouts.
             preprocessor: Optional AudioPreprocessor for standardizing incoming audio.
+            min_confidence_threshold: Optional minimum confidence threshold. If omitted,
+                inherits from adapter.config.min_confidence_threshold if present, otherwise 0.50.
+            enable_fallback: If True, enables automatic fallback to mock transcriber on supported failures.
+            fallback_adapter: Optional custom fallback adapter instance (defaults to DeterministicFakeTranscriber).
         """
-        self._adapter: BaseSTTAdapter = adapter if adapter is not None else DeterministicFakeTranscriber()
-        self._accumulator: OrderedSegmentAccumulator = (
-            accumulator if accumulator is not None else OrderedSegmentAccumulator()
-        )
         self._session_id: str = session_id or f"orch-session-{uuid4().hex[:8]}"
+        self._adapter: BaseSTTAdapter = adapter if adapter is not None else DeterministicFakeTranscriber()
+        self._primary_adapter: BaseSTTAdapter = self._adapter
+        self._enable_fallback: bool = enable_fallback or (fallback_adapter is not None)
+        self._fallback_adapter: Optional[BaseSTTAdapter] = fallback_adapter
+        self._is_fallback_active: bool = False
+        self._fallback_triggered: bool = False
+        self._fallback_reason: Optional[str] = None
+        self._fallback_error: Optional[STTErrorDetail] = None
+        self._is_cancelled: bool = False
+
+        # Resolve confidence threshold priority:
+        # 1. Explicit orchestrator parameter
+        # 2. Inherited from adapter configuration (if exposed)
+        # 3. Default fallback 0.50
+        if min_confidence_threshold is not None:
+            resolved_threshold = min_confidence_threshold
+        elif (
+            hasattr(self._adapter, "config")
+            and getattr(self._adapter.config, "min_confidence_threshold", None) is not None
+        ):
+            resolved_threshold = self._adapter.config.min_confidence_threshold
+        else:
+            resolved_threshold = 0.50
+
+        if (
+            not isinstance(resolved_threshold, (int, float))
+            or not math.isfinite(resolved_threshold)
+            or resolved_threshold < 0.0
+            or resolved_threshold > 1.0
+        ):
+            raise STTValidationError(
+                f"Confidence threshold must be a finite float in range [0.0, 1.0], got {resolved_threshold}.",
+                field_name="min_confidence_threshold",
+            )
+
+        if accumulator is not None:
+            self._accumulator = accumulator
+            if min_confidence_threshold is not None:
+                self._accumulator.min_confidence_threshold = resolved_threshold
+        else:
+            self._accumulator = OrderedSegmentAccumulator(
+                session_id=self._session_id,
+                min_confidence_threshold=resolved_threshold,
+            )
+
         self._retry_config: RetryConfig = retry_config or RetryConfig()
         self._preprocessor: Optional[AudioPreprocessor] = preprocessor
         self._retries_attempted: int = 0
@@ -285,6 +428,103 @@ class TranscriptionOrchestrator:
         """Current operational state of the underlying adapter."""
         return self._adapter.state
 
+    @property
+    def is_cancelled(self) -> bool:
+        """True if the current transcription operation has been cancelled."""
+        return self._is_cancelled
+
+    @property
+    def enable_fallback(self) -> bool:
+        """Whether mock provider fallback is enabled."""
+        return self._enable_fallback
+
+    @property
+    def is_fallback_active(self) -> bool:
+        """Whether the orchestrator is currently routed through the fallback adapter."""
+        return self._is_fallback_active
+
+    @property
+    def fallback_triggered(self) -> bool:
+        """Whether fallback was triggered during the current session."""
+        return self._fallback_triggered
+
+    @property
+    def fallback_reason(self) -> Optional[str]:
+        """Failure reason/code that triggered fallback, if any."""
+        return self._fallback_reason
+
+    @property
+    def fallback_error(self) -> Optional[STTErrorDetail]:
+        """Normalized error detail that triggered fallback, if any."""
+        return self._fallback_error
+
+    def cancel(self) -> None:
+        """Cancel the current in-flight transcription operation.
+
+        Idempotent: can be called multiple times safely.
+        Stops further chunk processing, clears uncommitted interim hypotheses
+        from the accumulator so no misleading final events are emitted, and
+        notifies the underlying adapter to cancel/release resources.
+        Session ID remains intact.
+        """
+        self._is_cancelled = True
+        self._accumulator.clear_interim()
+        if hasattr(self._adapter, "cancel") and callable(self._adapter.cancel):
+            self._adapter.cancel()
+
+    def _activate_fallback_and_process(
+        self,
+        chunk: AudioChunk | bytes,
+        is_last: bool,
+        trigger_error: STTErrorDetail,
+    ) -> List[TranscriptEvent]:
+        """Switch to fallback mock transcriber and transcribe the given chunk."""
+        self._is_fallback_active = True
+        self._fallback_triggered = True
+        self._fallback_reason = trigger_error.code
+        self._fallback_error = trigger_error
+
+        # Prepare fallback adapter if not already created
+        if self._fallback_adapter is None:
+            self._fallback_adapter = DeterministicFakeTranscriber()
+
+        self._fallback_adapter.initialize(session_id=self._session_id)
+        self._adapter = self._fallback_adapter
+
+        if self._is_cancelled:
+            return []
+
+        try:
+            events = self._adapter.transcribe_chunk(chunk, is_last=is_last)
+        except Exception as exc:
+            normalized_fallback_err = normalize_stt_error(exc, request_id=self._session_id)
+            err_event = TranscriptEvent(
+                event_id=str(uuid4()),
+                event_type=TranscriptEventType.ERROR,
+                sequence_number=self._accumulator.get_summary()["events_processed"],
+                timestamp=time.time(),
+                session_id=self._session_id,
+                error=normalized_fallback_err,
+                metadata={"fallback_failure": True},
+            )
+            self._accumulator.ingest_event(err_event)
+            return [err_event]
+
+        if self._is_cancelled:
+            return []
+
+        for event in events:
+            if self._session_id and (
+                event.session_id == "default-session"
+                or event.session_id == getattr(self._adapter, "session_id", None)
+            ):
+                object.__setattr__(event, "session_id", self._session_id)
+            if event.metadata is not None:
+                event.metadata["fallback_active"] = True
+            self._accumulator.ingest_event(event)
+
+        return events
+
     def initialize(self, session_id: Optional[str] = None) -> None:
         """Initialize orchestrator resources and prepare adapter and accumulator.
 
@@ -294,7 +534,7 @@ class TranscriptionOrchestrator:
         if session_id:
             self._session_id = session_id
         self._adapter.initialize(session_id=self._session_id)
-        self._accumulator.reset()
+        self._accumulator.reset(session_id=self._session_id)
         self._initialized = True
 
     def _execute_with_timeout(
@@ -342,6 +582,9 @@ class TranscriptionOrchestrator:
         Returns:
             List of TranscriptEvent objects emitted by the adapter for this chunk.
         """
+        if self._is_cancelled:
+            raise OrchestratorCancelledError("Transcription operation was cancelled.")
+
         if not self._initialized:
             self.initialize()
 
@@ -369,6 +612,9 @@ class TranscriptionOrchestrator:
                 else:
                     events = self._adapter.transcribe_chunk(active_chunk, is_last=is_last)
 
+                if self._is_cancelled:
+                    return []
+
                 # Check if adapter returned an error event in the list
                 error_event = next((e for e in events if e.event_type == TranscriptEventType.ERROR), None)
                 if error_event is not None and error_event.error is not None:
@@ -380,13 +626,30 @@ class TranscriptionOrchestrator:
                             time.sleep(self._retry_config.retry_delay * (self._retry_config.backoff_factor ** (attempt - 1)))
                         continue
                     else:
+                        if (
+                            self._enable_fallback
+                            and not self._is_fallback_active
+                            and is_supported_fallback_error(Exception(error_event.error.message), error_event.error)
+                        ):
+                            return self._activate_fallback_and_process(active_chunk, is_last, error_event.error)
+
                         # Non-retryable error, simulated test injection, or retries exhausted: ingest events and return
                         for event in events:
+                            if self._session_id and (
+                                event.session_id == "default-session"
+                                or event.session_id == getattr(self._adapter, "session_id", None)
+                            ):
+                                object.__setattr__(event, "session_id", self._session_id)
                             self._accumulator.ingest_event(event)
                         return events
 
                 # Successful processing: ingest events and return
                 for event in events:
+                    if self._session_id and (
+                        event.session_id == "default-session"
+                        or event.session_id == getattr(self._adapter, "session_id", None)
+                    ):
+                        object.__setattr__(event, "session_id", self._session_id)
                     self._accumulator.ingest_event(event)
                 return events
 
@@ -407,6 +670,12 @@ class TranscriptionOrchestrator:
                         time.sleep(self._retry_config.retry_delay * (self._retry_config.backoff_factor ** (attempt - 1)))
                     continue
                 else:
+                    if (
+                        self._enable_fallback
+                        and not self._is_fallback_active
+                        and is_supported_fallback_error(exc, normalized_error)
+                    ):
+                        return self._activate_fallback_and_process(active_chunk, is_last, normalized_error)
                     # Permanent error or retries exhausted
                     break
 
@@ -443,6 +712,9 @@ class TranscriptionOrchestrator:
         Yields:
             TranscriptEvent instances as transcription progresses.
         """
+        if self._is_cancelled:
+            return
+
         if not self._initialized:
             self.initialize()
 
@@ -472,15 +744,29 @@ class TranscriptionOrchestrator:
             return
 
         for current in it:
+            if self._is_cancelled:
+                return
             is_last = bool(prev.metadata.get("is_last", False)) if isinstance(prev, AudioChunk) else getattr(prev, "is_last", False)
-            events = self.process_chunk(prev, is_last=is_last)
+            try:
+                events = self.process_chunk(prev, is_last=is_last)
+            except OrchestratorCancelledError:
+                return
             for event in events:
+                if self._is_cancelled:
+                    return
                 yield event
             prev = current
 
         # Final chunk of the stream marked with is_last=True
-        events = self.process_chunk(prev, is_last=True)
+        if self._is_cancelled:
+            return
+        try:
+            events = self.process_chunk(prev, is_last=True)
+        except OrchestratorCancelledError:
+            return
         for event in events:
+            if self._is_cancelled:
+                return
             yield event
 
     def ingest_event(self, event: TranscriptEvent) -> bool:
@@ -493,11 +779,29 @@ class TranscriptionOrchestrator:
             event: TranscriptEvent to ingest.
 
         Returns:
-            True if event was processed; False if suppressed as a duplicate.
+            True if event was processed; False if suppressed as a duplicate or cancelled.
         """
+        if self._is_cancelled:
+            return False
         if not self._initialized:
             self.initialize()
+        if self._session_id and event.session_id == "default-session":
+            object.__setattr__(event, "session_id", self._session_id)
         return self._accumulator.ingest_event(event)
+
+    @property
+    def min_confidence_threshold(self) -> float:
+        """Minimum confidence threshold configured on the accumulator."""
+        return self._accumulator.min_confidence_threshold
+
+    @min_confidence_threshold.setter
+    def min_confidence_threshold(self, value: float) -> None:
+        """Dynamically update minimum confidence threshold on the accumulator."""
+        self._accumulator.min_confidence_threshold = value
+
+    def get_low_confidence_segments(self) -> List[TranscriptSegment]:
+        """Return defensive copy of quarantined low-confidence segments."""
+        return self._accumulator.get_low_confidence_segments()
 
     def get_full_transcript(self, include_interim: bool = False) -> str:
         """Return the accumulated transcript string."""
@@ -534,6 +838,11 @@ class TranscriptionOrchestrator:
         summary["retries_attempted"] = self._retries_attempted
         summary["timeouts_encountered"] = self._timeouts_encountered
         summary["retry_config"] = self._retry_config.model_dump()
+        summary["is_cancelled"] = self._is_cancelled
+        summary["fallback_active"] = self._is_fallback_active
+        summary["fallback_triggered"] = self._fallback_triggered
+        summary["fallback_reason"] = self._fallback_reason
+        summary["fallback_error"] = self._fallback_error.model_dump() if self._fallback_error else None
         return summary
 
     def get_status(self) -> STTAdapterStatus:
@@ -542,10 +851,17 @@ class TranscriptionOrchestrator:
 
     def reset(self) -> None:
         """Reset internal accumulator and adapter sequence counters for a fresh session."""
+        if self._is_fallback_active and self._primary_adapter is not None:
+            self._adapter = self._primary_adapter
         self._adapter.reset()
-        self._accumulator.reset()
+        self._accumulator.reset(session_id=self._session_id)
         self._retries_attempted = 0
         self._timeouts_encountered = 0
+        self._is_cancelled = False
+        self._is_fallback_active = False
+        self._fallback_triggered = False
+        self._fallback_reason = None
+        self._fallback_error = None
 
     def close(self) -> None:
         """Release underlying adapter and streaming resources."""

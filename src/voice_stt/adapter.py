@@ -85,6 +85,12 @@ class STTAdapterConfig(BaseModel):
         default=True,
         description="Enable punctuation restoration in transcription.",
     )
+    min_confidence_threshold: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold for committed final segments.",
+    )
     extra_options: Dict[str, Any] = Field(
         default_factory=dict,
         description="Provider-specific tuning parameters.",
@@ -213,6 +219,10 @@ class BaseSTTAdapter(ABC):
     def close(self) -> None:
         """Release any allocated provider or streaming resources."""
         self._state = STTAdapterState.CLOSED
+
+    def cancel(self) -> None:
+        """Cancel in-flight transcription and reset active processing buffers."""
+        pass
 
     def get_status(self) -> STTAdapterStatus:
         """Query current adapter telemetry and state."""

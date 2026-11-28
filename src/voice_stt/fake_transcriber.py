@@ -74,6 +74,8 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         seed: int = 42,
         inject_error_at_chunk: Optional[int] = None,
         error_detail: Optional[STTErrorDetail] = None,
+        emit_revisions: bool = False,
+        use_finalization: bool = False,
     ) -> None:
         """Initialize the deterministic fake transcriber.
 
@@ -84,12 +86,16 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             seed: Numerical seed ensuring deterministic event IDs and metrics.
             inject_error_at_chunk: Sequence index of chunk at which to emit an error event.
             error_detail: Custom error information to emit when error injection triggers.
+            emit_revisions: Whether progressive hypotheses emit REVISION instead of INTERIM.
+            use_finalization: Whether committed segments emit FINALIZATION instead of FINAL.
         """
         super().__init__(config)
         self.fixture = fixture
         self.script: Optional[List[str]] = list(script) if script else None
         self.seed = seed
         self.inject_error_at_chunk = inject_error_at_chunk
+        self.emit_revisions = emit_revisions
+        self.use_finalization = use_finalization
         self.error_detail = error_detail or STTErrorDetail(
             code="SIMULATED_TRANSCRIBER_ERROR",
             message="Deterministic simulated transcriber failure triggered.",
@@ -143,6 +149,12 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
         self._sentence_start = None
         self._last_error = None
         self._state = STTAdapterState.READY
+
+    def cancel(self) -> None:
+        """Cancel deterministic transcription and clear active sentence words."""
+        super().cancel()
+        self._active_sentence_words.clear()
+        self._sentence_start = None
 
     def transcribe_chunk(
         self,
@@ -216,8 +228,9 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             return events
 
         if self._current_fixture_event_idx < len(self.fixture.events):
-            evt = self.fixture.events[self._current_fixture_event_idx]
+            raw_evt = self.fixture.events[self._current_fixture_event_idx]
             self._current_fixture_event_idx += 1
+            evt = raw_evt.model_copy(update={"session_id": self._session_id}) if self._session_id else raw_evt
             events.append(evt)
             self._events_emitted += 1
 
@@ -265,10 +278,15 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
                     is_final=False,
                     language=self.config.language,
                 )
+                evt_type = (
+                    TranscriptEventType.REVISION
+                    if (self.emit_revisions and len(self._active_sentence_words) > 1)
+                    else TranscriptEventType.INTERIM
+                )
                 events.append(
                     TranscriptEvent(
                         event_id=self._deterministic_uuid(f"evt-interim-{self._chunks_processed}"),
-                        event_type=TranscriptEventType.INTERIM,
+                        event_type=evt_type,
                         sequence_number=self._events_emitted,
                         timestamp=chunk_end,
                         session_id=self._session_id,
@@ -317,9 +335,14 @@ class DeterministicFakeTranscriber(BaseSTTAdapter):
             language=self.config.language,
             words=words_timing,
         )
+        evt_type = (
+            TranscriptEventType.FINALIZATION
+            if self.use_finalization
+            else TranscriptEventType.FINAL
+        )
         evt = TranscriptEvent(
             event_id=self._deterministic_uuid(f"evt-final-{self._chunks_processed}"),
-            event_type=TranscriptEventType.FINAL,
+            event_type=evt_type,
             sequence_number=self._events_emitted,
             timestamp=sentence_end,
             session_id=self._session_id,
